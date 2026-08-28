@@ -9,7 +9,7 @@ Plugin id: `io.github.nerddotdad.tamomarchy`
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/nerddotdad/tomomarchy.git --enable
+omarchy plugin add https://github.com/nerddotdad/tamomarchy.git --enable
 ```
 
 That clones the plugin, validates the manifest, and enables it. The bar sprite lands on the **right** by default; move it with `omarchy bar move io.github.nerddotdad.tamomarchy`.
