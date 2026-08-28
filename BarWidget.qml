@@ -9,7 +9,7 @@ BarWidget {
   id: root
   moduleName: "io.github.nerddotdad.tamomarchy"
 
-  readonly property var pet: bar && bar.shell ? bar.shell.serviceFor("io.github.nerddotdad.tamomarchy") : null)
+  readonly property var pet: bar && bar.shell ? bar.shell.serviceFor("io.github.nerddotdad.tamomarchy") : null
   readonly property string pose: pet ? Model.poseFor(pet.snapshot(), false, pet.scene) : "idle"
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
