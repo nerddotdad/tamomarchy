@@ -1,19 +1,19 @@
-.import "Looks/parts/Bodies.js" as Bodies
-.import "Looks/parts/Heads.js" as Heads
-.import "Looks/parts/Hats.js" as Hats
-.import "Looks/parts/Arms.js" as Arms
-.import "Looks/parts/Legs.js" as Legs
-.import "Looks/parts/Tails.js" as Tails
 .import "Looks/Egg.js" as Egg
 .import "Looks/Mess.js" as Mess
 .import "Looks/Grave.js" as Grave
+.import "Looks/Md.js" as Md
+.import "Looks/shop/Parse.js" as Shop
+.import "Looks/parts/Parse.js" as Parts
 
-// Tamagotchi stats, mood, and stitched part sprites (Looks/parts/*.js).
+// Tamagotchi stats, mood, and stitched part sprites (Looks/parts/*/*.md).
 
 var STAT_MAX = 100
 
-// Real-time decay: a full belly lasts ~40 minutes, mood ~70 minutes,
-// and walking energy ~2 hours. Sleep refills energy in about 6 minutes.
+// Real-time decay on Medium: a full belly lasts ~40 minutes, mood ~70 minutes,
+// and walking energy ~2 hours. Easy is half that drop; Hard is twice.
+// Sleep refill stays the same (~6 minutes to full).
+var DIFFICULTIES = ["easy", "medium", "hard"]
+var DECAY_RATE = { easy: 0.5, medium: 1, hard: 2 }
 var HUNGER_DECAY_PER_MS = STAT_MAX / (40 * 60 * 1000)
 var HAPPY_DECAY_PER_MS = STAT_MAX / (70 * 60 * 1000)
 var ENERGY_WALK_PER_MS = STAT_MAX / (120 * 60 * 1000)
@@ -26,8 +26,17 @@ var PLAY_ENERGY = 18
 var PLAY_HUNGER = 10
 var PET_HAPPY = 12
 
-var SPRITE_COLS = 12
-var SPRITE_ROWS = 11
+var SPRITE_COLS = Md.COLS
+var SPRITE_ROWS = Md.ROWS
+
+var GENOME_SLOTS = [
+  ["body", "bodies", "round"],
+  ["head", "heads", "round"],
+  ["hat", "hats", "none"],
+  ["arms", "arms", "stubs"],
+  ["legs", "legs", "stubs"],
+  ["tail", "tails", "none"]
+]
 
 var MESS_STALE_MS = 4 * 60 * 1000
 var HAPPY_STALE_MESS_PER_MS = STAT_MAX / (18 * 60 * 1000)
@@ -74,7 +83,7 @@ function normalizeMess(raw) {
   return out
 }
 
-function normalizeGraves(raw) {
+function normalizeGraves(raw, parts) {
   if (!Array.isArray(raw)) return []
   var out = []
   for (var i = 0; i < raw.length; i++) {
@@ -83,8 +92,8 @@ function normalizeGraves(raw) {
     var died = Number(g.diedAt)
     if (!isFinite(died) || died <= 0) continue
     var born = Number(g.bornAt)
-    var cause = g.cause === "lonely" ? "lonely" : "starved"
-    var genome = hasGenome(g.genome) ? normalizeGenome(g.genome) : genomeFromAppearance(g.appearance)
+    var cause = g.cause === "lonely" || g.cause === "farm" ? g.cause : "starved"
+    var genome = hasGenome(g.genome) ? normalizeGenome(g.genome, parts) : genomeFromAppearance(g.appearance)
     out.push({
       name: String(g.name || "Mochi"),
       genome: genome,
@@ -97,33 +106,90 @@ function normalizeGraves(raw) {
   return out
 }
 
-function causeLabel(cause) {
-  if (cause === "farm") return "the farm"
-  if (cause === "lonely") return "lonely"
-  return "starved"
-}
-
-function roman(n) {
-  var v = Math.max(1, Math.floor(Number(n) || 1))
-  var map = [[10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]]
-  var s = ""
-  for (var i = 0; i < map.length; i++) {
-    while (v >= map[i][0]) {
-      s += map[i][1]
-      v -= map[i][0]
-    }
-  }
-  return s
-}
-
-function makeGrave(state, now, cause) {
+function makeGrave(state, now, cause, parts) {
   return {
     name: state.name || "Mochi",
-    genome: normalizeGenome(state.genome),
+    genome: normalizeGenome(state.genome, parts),
     bornAt: state.bornAt,
     diedAt: now,
     cause: cause
   }
+}
+
+function normalizeIds(raw) {
+  if (!Array.isArray(raw)) return []
+  var out = []
+  var seen = {}
+  for (var i = 0; i < raw.length; i++) {
+    var id = Md.cleanId(raw[i])
+    if (!id || seen[id]) continue
+    seen[id] = true
+    out.push(id)
+  }
+  return out
+}
+
+function normalizeDifficulty(raw) {
+  var s = String(raw || "").toLowerCase()
+  if (s === "easy" || s === "hard") return s
+  return "medium"
+}
+
+function difficultyLabel(raw) {
+  var s = normalizeDifficulty(raw)
+  if (s === "easy") return "Easy"
+  if (s === "hard") return "Hard"
+  return "Medium"
+}
+
+function decayRate(raw) {
+  return DECAY_RATE[normalizeDifficulty(raw)] || 1
+}
+
+function cycleDifficulty(current, dir) {
+  var idx = 1
+  var cur = normalizeDifficulty(current)
+  for (var i = 0; i < DIFFICULTIES.length; i++) {
+    if (DIFFICULTIES[i] === cur) idx = i
+  }
+  var step = dir < 0 ? -1 : 1
+  return DIFFICULTIES[(idx + step + DIFFICULTIES.length) % DIFFICULTIES.length]
+}
+
+function deathCause(state, now) {
+  if (!state || !state.hatched) return ""
+  var t = Number(now) || Date.now()
+  if (state.hungerEmptySince > 0 && t - state.hungerEmptySince >= STARVE_MS) return "starved"
+  if (state.happyEmptySince > 0 && t - state.happyEmptySince >= LONELY_MS) return "lonely"
+  return ""
+}
+
+function inCrisisSleep(state, now) {
+  return !!(state && state.noDeath && deathCause(state, now))
+}
+
+function applyCrisisSleep(next, now) {
+  if (inCrisisSleep(next, now)) next.sleeping = true
+  return next
+}
+
+function copyPrefs(from, to) {
+  to.maintenance = from && from.maintenance !== false
+  to.difficulty = normalizeDifficulty(from && from.difficulty)
+  to.noDeath = !!(from && from.noDeath)
+  return to
+}
+
+function copyShop(from, to) {
+  to.score = Math.max(0, Math.floor(Number(from && from.score) || 0))
+  to.scoreAccruedMs = Math.max(0, Number(from && from.scoreAccruedMs) || 0)
+  to.ownedHats = normalizeIds(from && from.ownedHats)
+  to.ownedToys = normalizeIds(from && from.ownedToys)
+  to.equippedHat = Md.cleanId(from && from.equippedHat)
+  to.equippedToy = Md.cleanId(from && from.equippedToy)
+  if (to.ownedHats.indexOf(to.equippedHat) < 0) to.equippedHat = ""
+  if (to.ownedToys.indexOf(to.equippedToy) < 0) to.equippedToy = ""
+  return to
 }
 
 function eggState(prev, now, graves) {
@@ -138,7 +204,8 @@ function eggState(prev, now, graves) {
   next.happiness = STAT_MAX
   next.energy = STAT_MAX
   next.gravesShown = prev.gravesShown !== false
-  next.maintenance = prev.maintenance !== false
+  copyPrefs(prev, next)
+  copyShop(prev, next)
   return next
 }
 
@@ -163,11 +230,15 @@ function hasGenome(raw) {
 function genomesEqual(a, b) {
   if (!a && !b) return true
   if (!a || !b) return false
-  return a.body === b.body && a.head === b.head && a.hat === b.hat
-    && a.arms === b.arms && a.legs === b.legs && a.tail === b.tail
+  for (var i = 0; i < GENOME_SLOTS.length; i++) {
+    var key = GENOME_SLOTS[i][0]
+    if (a[key] !== b[key]) return false
+  }
+  return true
 }
 
 function pickId(ids, value, fallback) {
+  if (value && (!ids || !ids.length)) return String(value)
   if (value && ids) {
     for (var i = 0; i < ids.length; i++) {
       if (ids[i] === value) return value
@@ -189,27 +260,23 @@ function genomeFromAppearance(appearance) {
   return { body: "round", head: "round", hat: "none", arms: "stubs", legs: "stubs", tail: "none" }
 }
 
-function normalizeGenome(raw) {
+function normalizeGenome(raw, parts) {
   var src = raw && typeof raw === "object" ? raw : {}
-  return {
-    body: pickId(Bodies.ids, src.body, "round"),
-    head: pickId(Heads.ids, src.head, "round"),
-    hat: pickId(Hats.ids, src.hat, "none"),
-    arms: pickId(Arms.ids, src.arms, "stubs"),
-    legs: pickId(Legs.ids, src.legs, "stubs"),
-    tail: pickId(Tails.ids, src.tail, "none")
+  var g = {}
+  for (var i = 0; i < GENOME_SLOTS.length; i++) {
+    var spec = GENOME_SLOTS[i]
+    g[spec[0]] = pickId(Parts.slotIds(parts, spec[1]), src[spec[0]], spec[2])
   }
+  return g
 }
 
-function randomGenome() {
-  return {
-    body: pickRandom(Bodies.ids),
-    head: pickRandom(Heads.ids),
-    hat: pickRandom(Hats.ids),
-    arms: pickRandom(Arms.ids),
-    legs: pickRandom(Legs.ids),
-    tail: pickRandom(Tails.ids)
+function randomGenome(parts) {
+  var g = {}
+  for (var i = 0; i < GENOME_SLOTS.length; i++) {
+    var spec = GENOME_SLOTS[i]
+    g[spec[0]] = pickRandom(Parts.slotIds(parts, spec[1])) || spec[2]
   }
+  return g
 }
 
 function normalizePen(raw) {
@@ -239,14 +306,22 @@ function defaultState(now) {
     graves: [],
     gravesShown: true,
     maintenance: true,
+    difficulty: "medium",
+    noDeath: false,
     hungerEmptySince: 0,
     happyEmptySince: 0,
     bornAt: t,
-    lastTick: t
+    lastTick: t,
+    score: 0,
+    scoreAccruedMs: 0,
+    ownedHats: [],
+    ownedToys: [],
+    equippedHat: "",
+    equippedToy: ""
   }
 }
 
-function normalizeState(raw, now) {
+function normalizeState(raw, now, parts) {
   var base = defaultState(now)
   if (!raw || typeof raw !== "object") return base
   base.hunger = clamp(raw.hunger, 0, STAT_MAX)
@@ -256,9 +331,10 @@ function normalizeState(raw, now) {
   base.shown = raw.shown !== false
   base.pen = normalizePen(raw.pen)
   base.mess = normalizeMess(raw.mess)
-  base.graves = normalizeGraves(raw.graves)
+  base.graves = normalizeGraves(raw.graves, parts)
   base.gravesShown = raw.gravesShown !== false
-  base.maintenance = raw.maintenance !== false
+  copyPrefs(raw, base)
+  copyShop(raw, base)
   base.hungerEmptySince = Number(raw.hungerEmptySince) > 0 ? Number(raw.hungerEmptySince) : 0
   base.happyEmptySince = Number(raw.happyEmptySince) > 0 ? Number(raw.happyEmptySince) : 0
   var born = Number(raw.bornAt)
@@ -271,7 +347,7 @@ function normalizeState(raw, now) {
   if (living) {
     base.hatched = true
     base.name = String(raw.name || "Mochi")
-    base.genome = hasGenome(raw.genome) ? normalizeGenome(raw.genome) : genomeFromAppearance(raw.appearance)
+    base.genome = hasGenome(raw.genome) ? normalizeGenome(raw.genome, parts) : genomeFromAppearance(raw.appearance)
   } else {
     base.hatched = false
     base.name = ""
@@ -280,12 +356,12 @@ function normalizeState(raw, now) {
   return base
 }
 
-function hatchPet(state, name, now) {
+function hatchPet(state, name, now, parts) {
   var t = Number(now) || Date.now()
-  var next = normalizeState(state, t)
+  var next = normalizeState(state, t, parts)
   next.hatched = true
   next.name = hatchName(name)
-  next.genome = randomGenome()
+  next.genome = randomGenome(parts)
   next.hunger = 82
   next.happiness = 78
   next.energy = 88
@@ -295,7 +371,8 @@ function hatchPet(state, name, now) {
   next.bornAt = t
   next.lastTick = t
   next.mess = []
-  next.maintenance = state && state.maintenance !== false
+  copyPrefs(state, next)
+  copyShop(state, next)
   return next
 }
 
@@ -343,12 +420,6 @@ function poseFor(state, moving, scene) {
   return "idle"
 }
 
-function blankFrame() {
-  var rows = []
-  for (var y = 0; y < SPRITE_ROWS; y++) rows.push("............")
-  return rows
-}
-
 function stamp(base, overlay) {
   if (!overlay) return base
   var out = []
@@ -365,79 +436,51 @@ function stamp(base, overlay) {
   return out
 }
 
-function pieceOf(lib, id) {
-  if (!lib) return null
-  var piece = null
-  if (id === "round") piece = lib.round
-  else if (id === "bean") piece = lib.bean
-  else if (id === "squat") piece = lib.squat
-  else if (id === "cat") piece = lib.cat
-  else if (id === "cyclops") piece = lib.cyclops
-  else if (id === "bird") piece = lib.bird
-  else if (id === "none") piece = lib.none
-  else if (id === "sprout") piece = lib.sprout
-  else if (id === "horns") piece = lib.horns
-  else if (id === "bow") piece = lib.bow
-  else if (id === "stubs") piece = lib.stubs
-  else if (id === "paws") piece = lib.paws
-  else if (id === "wings") piece = lib.wings
-  else if (id === "hooves") piece = lib.hooves
-  else if (id === "stub") piece = lib.stub
-  else if (id === "tuft") piece = lib.tuft
-  if (piece && piece.idle) return piece
-  return null
-}
-
-function pieceFrame(lib, id, pose, frame) {
-  var piece = pieceOf(lib, id)
+function pieceFrame(parts, slot, id, pose, frame) {
+  var piece = Parts.pieceOf(parts, slot, id)
   if (!piece) return null
-  if (pose === "walk") {
-    var w = (frame % 2 === 0) ? piece.walkA : piece.walkB
-    return w || piece.idle
-  }
-  if (pose === "dance") {
-    var d = (frame % 2 === 0) ? piece.danceA : piece.danceB
-    return d || piece.idle
-  }
-  if (pose === "watch") return piece.watch || piece.idle
-  if (pose === "eat") return piece.eat || piece.idle
-  if (pose === "sit") return piece.sit || piece.idle
-  if (pose === "sleep") return piece.sleep || piece.idle
-  if (pose === "sad") return piece.sad || piece.idle
-  return piece.idle
+  if (pose === "walk")
+    return ((frame % 2 === 0) ? piece.walkA : piece.walkB) || piece.idle
+  if (pose === "dance")
+    return ((frame % 2 === 0) ? piece.danceA : piece.danceB) || piece.idle
+  return piece[pose] || piece.idle
 }
 
-function compositePixels(genome, pose, frame) {
-  var g = normalizeGenome(genome)
-  var canvas = blankFrame()
-  canvas = stamp(canvas, pieceFrame(Tails, g.tail, pose, frame))
-  canvas = stamp(canvas, pieceFrame(Bodies, g.body, pose, frame))
-  canvas = stamp(canvas, pieceFrame(Legs, g.legs, pose, frame))
-  canvas = stamp(canvas, pieceFrame(Arms, g.arms, pose, frame))
-  canvas = stamp(canvas, pieceFrame(Heads, g.head, pose, frame))
-  canvas = stamp(canvas, pieceFrame(Hats, g.hat, pose, frame))
+function compositePixels(genome, pose, frame, parts) {
+  var g = normalizeGenome(genome, parts)
+  var canvas = Md.blankFrame()
+  canvas = stamp(canvas, pieceFrame(parts, "tails", g.tail, pose, frame))
+  canvas = stamp(canvas, pieceFrame(parts, "bodies", g.body, pose, frame))
+  canvas = stamp(canvas, pieceFrame(parts, "legs", g.legs, pose, frame))
+  canvas = stamp(canvas, pieceFrame(parts, "arms", g.arms, pose, frame))
+  canvas = stamp(canvas, pieceFrame(parts, "heads", g.head, pose, frame))
+  canvas = stamp(canvas, pieceFrame(parts, "hats", g.hat, pose, frame))
   return canvas
 }
 
-function framePixels(pose, frame, genome, hatched) {
+function framePixels(pose, frame, genome, hatched, shopHat, shopToy, shopFrame, parts) {
   if (hatched === false) {
     if (pose === "walk") return (frame % 2 === 0) ? Egg.walkA : Egg.walkB
     return Egg.idle
   }
-  return compositePixels(genome, pose, frame)
+  var canvas = compositePixels(genome, pose, frame, parts)
+  var tick = shopFrame === undefined || shopFrame === null ? frame : shopFrame
+  canvas = stamp(canvas, Shop.shopFrame(shopHat, tick))
+  canvas = stamp(canvas, Shop.shopFrame(shopToy, tick))
+  return canvas
 }
 
 function messPixels(kind) {
   return kind === "pee" ? Mess.pee : Mess.poop
 }
 
-var GRAVE_KINDS = ["cross", "flower", "sprout", "mound"]
 var GRAVE_SLOT = 34
 
 function graveKind(index, diedAt) {
-  var n = (Math.floor(Number(index) || 0) + Math.floor((Number(diedAt) || 0) / 1000)) % GRAVE_KINDS.length
-  if (n < 0) n += GRAVE_KINDS.length
-  return GRAVE_KINDS[n]
+  var kinds = Grave.ids
+  var n = (Math.floor(Number(index) || 0) + Math.floor((Number(diedAt) || 0) / 1000)) % kinds.length
+  if (n < 0) n += kinds.length
+  return kinds[n]
 }
 
 function graveTilt(index, diedAt) {
@@ -484,73 +527,76 @@ function gravePixels(kind) {
   return Grave.cross
 }
 
-function nibble(state, now) {
-  if (state && state.hatched === false) return normalizeState(state, now)
-  var next = tickState(state, now, false)
-  next.hunger = clamp(next.hunger + 16, 0, STAT_MAX)
-  next.happiness = clamp(next.happiness + 3, 0, STAT_MAX)
-  next.sleeping = false
-  return recoverEmptyFlags(next)
+function applyCare(state, now, parts, fn) {
+  if (state && state.hatched === false) return normalizeState(state, now, parts)
+  return applyCrisisSleep(fn(tickState(state, now, false, parts)), now)
 }
 
-function lullaby(state, now) {
-  if (state && state.hatched === false) return normalizeState(state, now)
-  var next = tickState(state, now, false)
-  next.energy = STAT_MAX
-  next.happiness = clamp(next.happiness + 10, 0, STAT_MAX)
-  next.sleeping = true
-  return recoverEmptyFlags(next)
+function nibble(state, now, parts) {
+  return applyCare(state, now, parts, function(next) {
+    next.hunger = clamp(next.hunger + 16, 0, STAT_MAX)
+    next.happiness = clamp(next.happiness + 3, 0, STAT_MAX)
+    next.sleeping = false
+    return recoverEmptyFlags(next)
+  })
 }
 
-function bath(state, now) {
-  if (state && state.hatched === false) return normalizeState(state, now)
-  var next = tickState(state, now, false)
-  next.happiness = clamp(next.happiness + 20, 0, STAT_MAX)
-  next.sleeping = false
-  return recoverEmptyFlags(next)
+function lullaby(state, now, parts) {
+  return applyCare(state, now, parts, function(next) {
+    next.energy = STAT_MAX
+    next.happiness = clamp(next.happiness + 10, 0, STAT_MAX)
+    next.sleeping = true
+    return recoverEmptyFlags(next)
+  })
 }
 
-function farmKill(state, now) {
+function bath(state, now, parts) {
+  return applyCare(state, now, parts, function(next) {
+    next.happiness = clamp(next.happiness + 20, 0, STAT_MAX)
+    next.sleeping = false
+    return recoverEmptyFlags(next)
+  })
+}
+
+function killPet(state, now, cause, parts) {
   var t = Number(now) || Date.now()
-  var next = normalizeState(state, t)
+  var next = normalizeState(state, t, parts)
   if (!next.hatched) return next
-  var graves = next.graves.concat([makeGrave(next, t, "farm")])
+  var graves = next.graves.concat([makeGrave(next, t, cause, parts)])
   if (graves.length > MAX_GRAVES) graves = graves.slice(graves.length - MAX_GRAVES)
   return eggState(next, t, graves)
 }
 
-function tickState(state, now, walking) {
-  var next = normalizeState(state, now)
+function farmKill(state, now, parts) {
+  return killPet(state, now, "farm", parts)
+}
+
+function tickState(state, now, walking, parts) {
+  var next = normalizeState(state, now, parts)
   var t = Number(now) || Date.now()
   var dt = Math.max(0, Math.min(t - next.lastTick, 6 * 60 * 60 * 1000))
   next.lastTick = t
   if (!next.hatched) return next
-  if (dt <= 0) return next
+  if (dt <= 0) return applyCrisisSleep(next, t)
 
-  if (next.maintenance === false) {
-    next.hunger = STAT_MAX
-    next.happiness = STAT_MAX
-    next.energy = STAT_MAX
-    next.hungerEmptySince = 0
-    next.happyEmptySince = 0
-    next.sleeping = false
-    return next
-  }
+  if (next.maintenance === false)
+    return applyCrisisSleep(next, t)
 
-  next.hunger = clamp(next.hunger - HUNGER_DECAY_PER_MS * dt, 0, STAT_MAX)
-  next.happiness = clamp(next.happiness - HAPPY_DECAY_PER_MS * dt, 0, STAT_MAX)
+  var rate = decayRate(next.difficulty)
+  next.hunger = clamp(next.hunger - HUNGER_DECAY_PER_MS * rate * dt, 0, STAT_MAX)
+  next.happiness = clamp(next.happiness - HAPPY_DECAY_PER_MS * rate * dt, 0, STAT_MAX)
 
   var stale = 0
   for (var i = 0; i < next.mess.length; i++) {
     if (t - next.mess[i].bornAt >= MESS_STALE_MS) stale++
   }
   if (stale > 0)
-    next.happiness = clamp(next.happiness - HAPPY_STALE_MESS_PER_MS * stale * dt, 0, STAT_MAX)
+    next.happiness = clamp(next.happiness - HAPPY_STALE_MESS_PER_MS * rate * stale * dt, 0, STAT_MAX)
 
   if (next.sleeping)
     next.energy = clamp(next.energy + ENERGY_SLEEP_PER_MS * dt, 0, STAT_MAX)
   else if (walking)
-    next.energy = clamp(next.energy - ENERGY_WALK_PER_MS * dt, 0, STAT_MAX)
+    next.energy = clamp(next.energy - ENERGY_WALK_PER_MS * rate * dt, 0, STAT_MAX)
 
   if (!next.sleeping && next.energy <= 4) next.sleeping = true
   if (next.sleeping && next.energy >= STAT_MAX - 0.5) next.sleeping = false
@@ -558,16 +604,10 @@ function tickState(state, now, walking) {
   next.hungerEmptySince = emptySince(next.hungerEmptySince, next.hunger <= 0.5, t)
   next.happyEmptySince = emptySince(next.happyEmptySince, next.happiness <= 0.5, t)
 
-  var cause = ""
-  if (next.hungerEmptySince > 0 && t - next.hungerEmptySince >= STARVE_MS) cause = "starved"
-  else if (next.happyEmptySince > 0 && t - next.happyEmptySince >= LONELY_MS) cause = "lonely"
-
-  if (cause) {
-    var graves = next.graves.concat([makeGrave(next, t, cause)])
-    if (graves.length > MAX_GRAVES) graves = graves.slice(graves.length - MAX_GRAVES)
-    return eggState(next, t, graves)
-  }
-  return next
+  var cause = deathCause(next, t)
+  if (cause && !next.noDeath)
+    return killPet(next, t, cause, parts)
+  return applyCrisisSleep(next, t)
 }
 
 function recoverEmptyFlags(next) {
@@ -576,38 +616,42 @@ function recoverEmptyFlags(next) {
   return next
 }
 
-function feed(state, now) {
-  if (state && state.hatched === false) return normalizeState(state, now)
-  var next = tickState(state, now, false)
-  next.hunger = clamp(next.hunger + FEED_HUNGER, 0, STAT_MAX)
-  next.happiness = clamp(next.happiness + FEED_HAPPY, 0, STAT_MAX)
-  next.sleeping = false
-  return recoverEmptyFlags(next)
+function feed(state, now, parts) {
+  return applyCare(state, now, parts, function(next) {
+    next.hunger = clamp(next.hunger + FEED_HUNGER, 0, STAT_MAX)
+    next.happiness = clamp(next.happiness + FEED_HAPPY, 0, STAT_MAX)
+    next.sleeping = false
+    return recoverEmptyFlags(next)
+  })
 }
 
-function play(state, now) {
-  if (state && state.hatched === false) return normalizeState(state, now)
-  var next = tickState(state, now, false)
-  next.happiness = clamp(next.happiness + PLAY_HAPPY, 0, STAT_MAX)
-  next.energy = clamp(next.energy - PLAY_ENERGY, 0, STAT_MAX)
-  next.hunger = clamp(next.hunger - PLAY_HUNGER, 0, STAT_MAX)
-  next.sleeping = next.energy <= 4
-  return recoverEmptyFlags(next)
+function play(state, now, parts) {
+  return applyCare(state, now, parts, function(next) {
+    next.happiness = clamp(next.happiness + PLAY_HAPPY, 0, STAT_MAX)
+    next.energy = clamp(next.energy - PLAY_ENERGY, 0, STAT_MAX)
+    next.hunger = clamp(next.hunger - PLAY_HUNGER, 0, STAT_MAX)
+    next.sleeping = next.energy <= 4
+    return recoverEmptyFlags(next)
+  })
 }
 
-function pet(state, now) {
-  if (state && state.hatched === false) return normalizeState(state, now)
-  var next = tickState(state, now, false)
-  next.happiness = clamp(next.happiness + PET_HAPPY, 0, STAT_MAX)
-  if (next.sleeping && next.happiness > 40) next.sleeping = false
-  return recoverEmptyFlags(next)
+function pet(state, now, parts) {
+  return applyCare(state, now, parts, function(next) {
+    next.happiness = clamp(next.happiness + PET_HAPPY, 0, STAT_MAX)
+    if (next.sleeping && next.happiness > 40) next.sleeping = false
+    return recoverEmptyFlags(next)
+  })
 }
 
-function toggleSleep(state, now) {
-  if (state && state.hatched === false) return normalizeState(state, now)
-  var next = tickState(state, now, false)
-  next.sleeping = !(state && state.sleeping === true)
-  return next
+function toggleSleep(state, now, parts) {
+  return applyCare(state, now, parts, function(next) {
+    if (inCrisisSleep(next, now)) {
+      next.sleeping = true
+      return next
+    }
+    next.sleeping = !(state && state.sleeping === true)
+    return next
+  })
 }
 
 function ageLabel(bornAt, now, hatched) {

@@ -4,7 +4,7 @@ import Quickshell
 import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
+import "../Model.js" as Model
 
 PanelWindow {
   id: panel
@@ -119,6 +119,20 @@ PanelWindow {
     height: menuRow.implicitHeight
     z: 50
 
+    Text {
+      visible: host.pet && (host.pet.carePaused || host.pet.crisisSleep)
+      anchors.horizontalCenter: menuRow.horizontalCenter
+      anchors.bottom: menuRow.top
+      anchors.bottomMargin: 6
+      width: menuRow.implicitWidth
+      text: host.pet && host.pet.crisisSleep ? "Sleeping it off. Feed or play to wake." : "Stats paused. Re-enable in the panel."
+      color: Color.foreground
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+      horizontalAlignment: Text.AlignHCenter
+    }
+
     Row {
       id: menuRow
       spacing: 4
@@ -181,7 +195,7 @@ PanelWindow {
 
         ThemeSvg {
           anchors.fill: parent
-          source: model.kind === "pizza" ? Qt.resolvedUrl("icons/pizza.svg") : Qt.resolvedUrl("icons/burger.svg")
+          source: model.kind === "pizza" ? Qt.resolvedUrl("../icons/pizza.svg") : Qt.resolvedUrl("../icons/burger.svg")
           sourceSize.width: host.foodSize * 2
           sourceSize.height: host.foodSize * 2
           tint: Color.foreground
@@ -227,7 +241,7 @@ PanelWindow {
         anchors.centerIn: parent
         width: 34
         height: 34
-        source: Qt.resolvedUrl("icons/soap.svg")
+        source: Qt.resolvedUrl("../icons/soap.svg")
         sourceSize.width: 68
         sourceSize.height: 68
         tint: Color.foreground
@@ -306,7 +320,7 @@ PanelWindow {
       }
     }
 
-    LullabyPad {
+    Lullaby {
       visible: host.game === "sleep"
       z: 80
       nextKey: host.lullabyKeys[host.lullabyHits] || ""
@@ -401,6 +415,10 @@ PanelWindow {
       facingLeft: host.facingLeft
       hatched: host.pet ? host.pet.hatched : false
       genome: host.pet ? host.pet.genome : null
+      shopHat: host.pet ? host.pet.hatItem : null
+      shopToy: host.pet ? host.pet.toyItem : null
+      parts: host.pet ? host.pet.partSet : null
+      shopFrame: host.shopFrame
       bodyColor: Color.accent
     }
   }
@@ -453,7 +471,7 @@ PanelWindow {
     Repeater {
       model: host && host.pet ? host.pet.graveModel : 0
 
-      Tombstone {
+      GraveSprite {
         petName: model.name
         cause: model.cause
         bornAt: model.bornAt

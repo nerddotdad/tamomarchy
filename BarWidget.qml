@@ -4,13 +4,21 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "components"
 
 BarWidget {
   id: root
   moduleName: "io.github.nerddotdad.tamomarchy"
 
   readonly property var pet: bar && bar.shell ? bar.shell.serviceFor("io.github.nerddotdad.tamomarchy") : null
-  readonly property string pose: pet ? Model.poseFor(pet.snapshot(), false, pet.scene) : "idle"
+  readonly property string pose: {
+    if (!pet) return "idle"
+    if (pet.hatched && !pet.sleeping && pet.scene === "") {
+      if (pet.toyPose === "dance") return "dance"
+      if (pet.toyPose === "walk") return "walk"
+    }
+    return Model.poseFor(pet.snapshot(), false, pet.scene)
+  }
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
@@ -94,12 +102,26 @@ BarWidget {
       anchors.centerIn: parent
       pixelSize: 2
       pose: root.pose
+      frame: (root.pose === "walk" || root.pose === "dance") ? barShopTick.frame % 2 : 0
       hatched: pet ? pet.hatched : false
       genome: pet ? pet.genome : null
+      shopHat: pet ? pet.hatItem : null
+      shopToy: pet ? pet.toyItem : null
+      parts: pet ? pet.partSet : null
+      shopFrame: barShopTick.frame
       bodyColor: root.bar ? root.bar.barForeground : Color.accent
       lineColor: root.bar ? Qt.darker(root.bar.barForeground, 1.25) : Qt.darker(Color.accent, 1.35)
       eyeColor: root.bar ? root.bar.background : Color.background
       pupilColor: root.bar ? root.bar.barForeground : Color.foreground
+    }
+
+    Timer {
+      id: barShopTick
+      property int frame: 0
+      interval: 280
+      repeat: true
+      running: !!pet && pet.hatched
+      onTriggered: frame = (frame + 1) % 5
     }
 
     onPressed: function(buttonCode) {

@@ -6,6 +6,7 @@ import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "components"
 
 // Fullscreen click-through overlay. The pet is the only input region, so
 // the rest of the desktop stays usable while Mochi wanders on top of it.
@@ -28,20 +29,32 @@ Item {
   property bool moving: false
   property bool facingLeft: false
   property int walkFrame: 0
+  property int shopFrame: 0
   property double nowMs: 0
 
   readonly property int spriteScale: 6
   readonly property int spriteW: Model.SPRITE_COLS * spriteScale
   readonly property int spriteH: Model.SPRITE_ROWS * spriteScale
+  readonly property string toyPose: {
+    if (!pet || !pet.hatched || pet.sleeping || pet.scene !== "" || root.holding || root.game !== "")
+      return ""
+    return pet.toyPose || ""
+  }
   readonly property string pose: {
     if (!pet) return "idle"
     if (root.holding) return "walk"
     if (root.game === "sleep") return "sleep"
     if (root.game === "play" && root.moving) return "walk"
     if (!pet.hatched) return "walk"
+    if (root.toyPose === "dance") return "dance"
+    if (root.toyPose === "walk") return "walk"
     return Model.poseFor(pet.snapshot(), root.moving, pet.scene)
   }
-  readonly property real bounceY: pose === "dance" ? Math.round(Math.sin(nowMs / 140) * 7) : 0
+  readonly property real bounceY: {
+    if (pose === "dance") return Math.round(Math.sin(nowMs / 140) * 7)
+    if (root.toyPose === "jump") return Math.round(Math.abs(Math.sin(nowMs / 180)) * 9)
+    return 0
+  }
   readonly property bool watching: pose === "watch" && root.game === ""
   readonly property bool dancing: pose === "dance" && root.game === ""
   readonly property bool drawing: pet ? pet.drawingPen === true : false
@@ -564,14 +577,15 @@ Item {
     root.menuOutput = s.name || ""
     var rowW = 300
     var rowH = 70
+    var caption = (root.pet && (root.pet.carePaused || root.pet.crisisSleep)) ? 28 : 0
     var minX = 12
     var maxX = Math.max(minX, s.width - rowW - 12)
     var lx = root.petX - s.x
     var ly = root.petY - s.y
     var cx = lx + spriteW / 2
     root.menuX = Math.min(maxX, Math.max(minX, cx - rowW / 2))
-    var below = ly + spriteH + 12
-    var above = ly - rowH - 12
+    var below = ly + spriteH + 12 + caption
+    var above = ly - rowH - 12 - caption
     var maxY = s.height - rowH - root.barClearance("bottom")
     var minY = root.barClearance("top")
     if (below <= maxY) root.menuY = below
@@ -588,7 +602,7 @@ Item {
     root.moving = false
     if (root.pet) {
       root.pet.walking = true
-      if (root.pet.hatched && root.pet.sleeping) root.pet.toggleSleep()
+      if (root.pet.hatched && root.pet.sleeping && !root.pet.crisisSleep) root.pet.toggleSleep()
     }
     root.placeHoldMenu()
     Qt.callLater(root.placeHoldMenu)
@@ -996,8 +1010,15 @@ Item {
   Timer {
     interval: (root.pet && !root.pet.hatched) ? 560 : 180
     repeat: true
-    running: root.opened && (root.moving || root.dancing || root.holding || (root.pet && !root.pet.hatched))
+    running: root.opened && (root.moving || root.dancing || root.holding || root.toyPose === "walk" || root.toyPose === "jump" || (root.pet && !root.pet.hatched))
     onTriggered: root.walkFrame = (root.walkFrame + 1) % 2
+  }
+
+  Timer {
+    interval: 280
+    repeat: true
+    running: root.opened && root.pet && root.pet.hatched
+    onTriggered: root.shopFrame = (root.shopFrame + 1) % 5
   }
 
   Timer {

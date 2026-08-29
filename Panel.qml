@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
+import "components"
 
 Panel {
   id: root
@@ -12,8 +12,27 @@ Panel {
   property var anchorItem: null
   property var hostWidget: null
   property var pet: null
+  property string view: "care"
+  property string shopTab: "hats"
   readonly property var livePet: pet || (bar && bar.shell ? bar.shell.serviceFor("io.github.nerddotdad.tamomarchy") : null)
   readonly property bool isEgg: livePet ? livePet.hatched === false : true
+  readonly property bool inShop: view === "shop"
+  readonly property int points: livePet ? livePet.score : 0
+  readonly property string hatLabel: {
+    var p = root.livePet
+    if (!p || !p.equippedHat) return "No hat"
+    return (p.hatItem && p.hatItem.name) ? p.hatItem.name : "No hat"
+  }
+  readonly property string toyLabel: {
+    var p = root.livePet
+    if (!p || !p.equippedToy) return "No toy"
+    return (p.toyItem && p.toyItem.name) ? p.toyItem.name : "No toy"
+  }
+  readonly property int shopRev: livePet ? livePet.shopRev : 0
+  readonly property var shopItems: {
+    if (!root.livePet) return []
+    return root.shopTab === "toys" ? (root.livePet.shopToys || []) : (root.livePet.shopHats || [])
+  }
 
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
@@ -23,6 +42,7 @@ Panel {
   }
 
   function close() {
+    root.view = "care"
     root.controller.hide()
   }
 
@@ -37,6 +57,29 @@ Panel {
     playpenStart.outputName = panel.screen ? panel.screen.name : ""
     root.close()
     playpenStart.restart()
+  }
+
+  function openShop() {
+    root.shopTab = "hats"
+    root.view = "shop"
+    if (root.livePet) root.livePet.reloadShop()
+  }
+
+  function shopOwned(item) {
+    return !!(root.livePet && item && root.livePet.owns(item.kind, item.id))
+  }
+
+  function shopCanBuy(item) {
+    if (!root.livePet || !item || !(item.cost > 0)) return false
+    if (root.shopOwned(item)) return false
+    return root.livePet.score >= item.cost
+  }
+
+  function shopButtonLabel(item) {
+    if (root.shopOwned(item)) return "Owned"
+    if (!item || !(item.cost > 0)) return "Buy"
+    if (!root.livePet || root.livePet.score < item.cost) return "Need more pts"
+    return "Buy"
   }
 
   Timer {
@@ -64,11 +107,12 @@ Panel {
     bar: root.bar
     open: root.opened
     onOpenChanged: {
+      if (!open) root.view = "care"
       if (open && root.isEgg)
         Qt.callLater(function() { nameField.forceActiveFocus() })
     }
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(320))
+    contentWidth: panel.fittedContentWidth(Style.space(root.inShop ? 360 : 320))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
 
     PanelKeyCatcher {
@@ -101,7 +145,7 @@ Panel {
             spacing: Style.space(2)
 
             Text {
-              text: root.isEgg ? "An egg" : (root.livePet ? root.livePet.petName : "tamOmarchy")
+              text: root.inShop ? "Shop" : (root.isEgg ? "An egg" : (root.livePet ? root.livePet.petName : "tamOmarchy"))
               color: root.contentForeground
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.subtitle
@@ -109,7 +153,7 @@ Panel {
             }
 
             Text {
-              text: root.livePet ? (root.livePet.moodLabel + " · " + root.livePet.ageLabel) : ""
+              text: root.livePet ? (root.points + " pts · " + root.livePet.moodLabel + " · " + root.livePet.ageLabel) : ""
               color: Qt.darker(root.contentForeground, 1.5)
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.caption
@@ -117,6 +161,7 @@ Panel {
           }
 
           Item {
+            visible: !root.inShop
             width: parent.width
             height: skinSprite.height
 
@@ -127,8 +172,20 @@ Panel {
               pixelSize: 6
               hatched: root.livePet ? root.livePet.hatched : false
               genome: root.livePet ? root.livePet.genome : null
-              pose: root.isEgg ? "walk" : (root.livePet ? (root.livePet.sleeping ? "sleep" : (root.livePet.mood === "sad" ? "sad" : "idle")) : "idle")
-              frame: eggWobble.frame
+              shopHat: root.livePet ? root.livePet.hatItem : null
+              shopToy: root.livePet ? root.livePet.toyItem : null
+              parts: root.livePet ? root.livePet.partSet : null
+              shopFrame: dressTick.frame
+              pose: {
+                if (root.isEgg) return "walk"
+                if (!root.livePet) return "idle"
+                if (root.livePet.sleeping) return "sleep"
+                if (root.livePet.toyPose === "dance") return "dance"
+                if (root.livePet.toyPose === "walk") return "walk"
+                if (root.livePet.mood === "sad") return "sad"
+                return "idle"
+              }
+              frame: root.isEgg ? eggWobble.frame : dressTick.frame
               bodyColor: Color.accent
             }
 
@@ -137,13 +194,22 @@ Panel {
               property int frame: 0
               interval: 560
               repeat: true
-              running: root.opened && root.isEgg
+              running: root.opened && root.isEgg && !root.inShop
               onTriggered: frame = (frame + 1) % 2
+            }
+
+            Timer {
+              id: dressTick
+              property int frame: 0
+              interval: 280
+              repeat: true
+              running: root.opened && !root.isEgg
+              onTriggered: frame = (frame + 1) % 5
             }
           }
 
           Column {
-            visible: root.isEgg
+            visible: root.isEgg && !root.inShop
             width: parent.width
             spacing: Style.space(8)
 
@@ -177,9 +243,111 @@ Panel {
           }
 
           Column {
-            visible: !root.isEgg
+            visible: !root.isEgg && !root.inShop
             width: parent.width
             spacing: Style.space(8)
+
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Button {
+                width: Style.space(36)
+                text: "‹"
+                bordered: true
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: if (root.livePet) root.livePet.cycleEquip("hat", -1)
+              }
+
+              Text {
+                width: parent.width - Style.space(88)
+                height: parent.height
+                text: root.hatLabel
+                color: root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+              }
+
+              Button {
+                width: Style.space(36)
+                text: "›"
+                bordered: true
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: if (root.livePet) root.livePet.cycleEquip("hat", 1)
+              }
+            }
+
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Button {
+                width: Style.space(36)
+                text: "‹"
+                bordered: true
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: if (root.livePet) root.livePet.cycleEquip("toy", -1)
+              }
+
+              Text {
+                width: parent.width - Style.space(88)
+                height: parent.height
+                text: root.toyLabel
+                color: root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+              }
+
+              Button {
+                width: Style.space(36)
+                text: "›"
+                bordered: true
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: if (root.livePet) root.livePet.cycleEquip("toy", 1)
+              }
+            }
+
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Button {
+                width: Style.space(36)
+                text: "‹"
+                bordered: true
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: if (root.livePet) root.livePet.cycleDifficulty(-1)
+              }
+
+              Text {
+                width: parent.width - Style.space(88)
+                height: parent.height
+                text: root.livePet ? root.livePet.difficultyLabel : "Medium"
+                color: root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+              }
+
+              Button {
+                width: Style.space(36)
+                text: "›"
+                bordered: true
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: if (root.livePet) root.livePet.cycleDifficulty(1)
+              }
+            }
 
             Repeater {
               model: [
@@ -236,49 +404,194 @@ Panel {
               }
             }
 
-          Row {
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Button {
+                width: (parent.width - parent.spacing) / 2
+                text: "Draw playpen"
+                bordered: true
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: root.startScreenDraw()
+              }
+
+              Button {
+                width: (parent.width - parent.spacing) / 2
+                text: "Wander freely"
+                bordered: true
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: if (root.livePet) root.livePet.clearPen()
+              }
+            }
+
+            Button {
+              width: parent.width
+              text: "Shop"
+              bordered: true
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: root.openShop()
+            }
+
+            Toggle {
+              width: parent.width
+              label: "Pause Care"
+              description: "Freeze stats and points where they are. Turn off to resume care."
+              checked: root.livePet ? root.livePet.carePaused : false
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: if (root.livePet) root.livePet.toggleMaintenance()
+            }
+
+            Toggle {
+              width: parent.width
+              label: "No Death"
+              description: "Starve and lonely put them to sleep instead of dying. The Kill mini-game still works."
+              checked: root.livePet ? root.livePet.noDeath : false
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: if (root.livePet) root.livePet.toggleNoDeath()
+            }
+
+            Toggle {
+              visible: root.livePet && root.livePet.graveCount > 0
+              width: parent.width
+              label: "Graves"
+              description: "Show tombstones along the bottom of the screen."
+              checked: root.livePet ? root.livePet.gravesShown !== false : true
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: if (root.livePet) root.livePet.toggleGraves()
+            }
+          }
+
+          Column {
+            visible: root.inShop
             width: parent.width
             spacing: Style.space(8)
 
-            Button {
-              width: (parent.width - parent.spacing) / 2
-              text: "Draw playpen"
-              bordered: true
-              foreground: root.contentForeground
-              fontFamily: root.contentFontFamily
-              onClicked: root.startScreenDraw()
+            Timer {
+              id: shopTick
+              property int frame: 0
+              interval: 280
+              repeat: true
+              running: root.opened && root.inShop
+              onTriggered: frame = (frame + 1) % 5
+            }
+
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+
+              Button {
+                width: (parent.width - parent.spacing) / 2
+                text: "Hats"
+                bordered: root.shopTab !== "hats"
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: root.shopTab = "hats"
+              }
+
+              Button {
+                width: (parent.width - parent.spacing) / 2
+                text: "Toys"
+                bordered: root.shopTab !== "toys"
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: root.shopTab = "toys"
+              }
+            }
+
+            Grid {
+              id: shopGrid
+              width: parent.width
+              columns: 2
+              columnSpacing: Style.space(8)
+              rowSpacing: Style.space(8)
+
+              Repeater {
+                model: root.shopItems
+
+                Rectangle {
+                  required property var modelData
+                  width: (shopGrid.width - shopGrid.columnSpacing) / 2
+                  height: shopCard.implicitHeight + Style.space(16)
+                  radius: Style.cornerRadius
+                  color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08)
+
+                  Column {
+                    id: shopCard
+                    width: parent.width - Style.space(16)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                    anchors.topMargin: Style.space(8)
+                    spacing: Style.space(6)
+
+                    PetSprite {
+                      anchors.horizontalCenter: parent.horizontalCenter
+                      pixelSize: 5
+                      hatched: true
+                      genome: root.livePet ? root.livePet.genome : null
+                      parts: root.livePet ? root.livePet.partSet : null
+                      shopHat: {
+                        if (modelData && modelData.kind === "hat") return modelData
+                        return root.livePet ? root.livePet.hatItem : null
+                      }
+                      shopToy: (modelData && modelData.kind === "toy") ? modelData : null
+                      pose: {
+                        if (!modelData || modelData.kind !== "toy") return "idle"
+                        if (modelData.pose === "dance" || modelData.pose === "walk") return modelData.pose
+                        return "idle"
+                      }
+                      frame: shopTick.frame
+                      shopFrame: shopTick.frame
+                      bodyColor: Color.accent
+                    }
+
+                    Text {
+                      width: parent.width
+                      text: modelData && modelData.name ? modelData.name : ""
+                      color: root.contentForeground
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      horizontalAlignment: Text.AlignHCenter
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      width: parent.width
+                      text: modelData && modelData.cost > 0 ? (modelData.cost + " pts") : "—"
+                      color: Qt.darker(root.contentForeground, 1.5)
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                      horizontalAlignment: Text.AlignHCenter
+                    }
+
+                    Button {
+                      width: parent.width
+                      text: (root.shopRev, root.points, root.shopButtonLabel(modelData))
+                      bordered: true
+                      enabled: (root.shopRev, root.shopCanBuy(modelData))
+                      foreground: root.contentForeground
+                      fontFamily: root.contentFontFamily
+                      onClicked: if (root.livePet && modelData) root.livePet.buyItem(modelData.kind, modelData.id)
+                    }
+                  }
+                }
+              }
             }
 
             Button {
-              width: (parent.width - parent.spacing) / 2
-              text: "Wander freely"
+              width: parent.width
+              text: "Back"
               bordered: true
               foreground: root.contentForeground
               fontFamily: root.contentFontFamily
-              onClicked: if (root.livePet) root.livePet.clearPen()
+              onClicked: root.view = "care"
             }
-          }
-
-          Toggle {
-            width: parent.width
-            label: "Maintenance"
-            description: "Hunger, mood, energy, and mess. Off lets him wander with full stats."
-            checked: root.livePet ? root.livePet.maintenance !== false : true
-            foreground: root.contentForeground
-            fontFamily: root.contentFontFamily
-            onClicked: if (root.livePet) root.livePet.toggleMaintenance()
-          }
-
-          Toggle {
-            visible: root.livePet && root.livePet.graveCount > 0
-            width: parent.width
-            label: "Graves"
-            description: "Show tombstones along the bottom of the screen."
-            checked: root.livePet ? root.livePet.gravesShown !== false : true
-            foreground: root.contentForeground
-            fontFamily: root.contentFontFamily
-            onClicked: if (root.livePet) root.livePet.toggleGraves()
-          }
           }
         }
       }

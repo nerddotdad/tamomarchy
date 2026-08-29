@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
 import "Model.js" as Model
+import "catalog"
 
 
 // Persistent pet: hunger, mood, energy, and whether the overlay is showing.
@@ -46,7 +47,16 @@ Item {
   property bool _skipGraveApply: false
   property bool gravesShown: true
   property bool maintenance: true
+  property string difficulty: "medium"
+  property bool noDeath: false
   property bool farming: false
+  property int score: 0
+  property double scoreAccruedMs: 0
+  property var ownedHats: []
+  property var ownedToys: []
+  property string equippedHat: ""
+  property string equippedToy: ""
+  property int shopRev: 0
 
   property bool _hydrating: true
   property bool _loaded: false
@@ -91,6 +101,20 @@ Item {
   readonly property int energyPct: Math.round(energy)
   readonly property int messCount: messItems.count
   readonly property int graveCount: graveItems.count
+  readonly property bool carePaused: maintenance === false
+  readonly property string difficultyLabel: Model.difficultyLabel(difficulty)
+  readonly property bool crisisSleep: Model.inCrisisSleep({
+    hatched: hatched,
+    noDeath: noDeath,
+    hungerEmptySince: hungerEmptySince,
+    happyEmptySince: happyEmptySince
+  }, lastTick)
+  readonly property var shopHats: catalog.hats
+  readonly property var shopToys: catalog.toys
+  readonly property var hatItem: catalog.itemById("hat", equippedHat)
+  readonly property var toyItem: catalog.itemById("toy", equippedToy)
+  readonly property string toyPose: toyItem && toyItem.pose ? String(toyItem.pose) : ""
+  readonly property var partSet: partsCatalog.partSet
 
   ListModel { id: messItems }
   readonly property alias messModel: messItems
@@ -121,7 +145,7 @@ Item {
 
   function replaceGraves(list) {
     graveItems.clear()
-    var next = Model.normalizeGraves(list)
+    var next = Model.normalizeGraves(list, root.partSet)
     for (var i = 0; i < next.length; i++) {
       var g = next[i]
       graveItems.append({
@@ -152,9 +176,9 @@ Item {
   function parseGenomeJson(text) {
     try {
       var g = JSON.parse(text || "{}")
-      return Model.normalizeGenome(g)
+      return Model.normalizeGenome(g, root.partSet)
     } catch (e) {
-      return Model.normalizeGenome(null)
+      return Model.normalizeGenome(null, root.partSet)
     }
   }
 
@@ -173,10 +197,18 @@ Item {
       graves: graveSnapshot(),
       gravesShown: gravesShown,
       maintenance: maintenance,
+      difficulty: difficulty,
+      noDeath: noDeath,
       hungerEmptySince: hungerEmptySince,
       happyEmptySince: happyEmptySince,
       bornAt: bornAt,
-      lastTick: lastTick
+      lastTick: lastTick,
+      score: score,
+      scoreAccruedMs: scoreAccruedMs,
+      ownedHats: ownedHats,
+      ownedToys: ownedToys,
+      equippedHat: equippedHat,
+      equippedToy: equippedToy
     }
   }
 
@@ -193,7 +225,7 @@ Item {
   function apply(next) {
     hatched = next.hatched === true
     petName = hatched ? next.name : ""
-    var g = hatched ? Model.normalizeGenome(next.genome) : null
+    var g = hatched ? Model.normalizeGenome(next.genome, root.partSet) : null
     if (!Model.genomesEqual(genome, g)) genome = g
     hunger = next.hunger
     happiness = next.happiness
@@ -205,10 +237,18 @@ Item {
     if (!root._skipGraveApply) replaceGraves(next.graves)
     gravesShown = next.gravesShown !== false
     maintenance = next.maintenance !== false
+    difficulty = Model.normalizeDifficulty(next.difficulty)
+    noDeath = next.noDeath === true
     hungerEmptySince = next.hungerEmptySince || 0
     happyEmptySince = next.happyEmptySince || 0
     bornAt = next.bornAt
     lastTick = next.lastTick
+    score = Math.max(0, Math.floor(Number(next.score) || 0))
+    scoreAccruedMs = Math.max(0, Number(next.scoreAccruedMs) || 0)
+    ownedHats = next.ownedHats || []
+    ownedToys = next.ownedToys || []
+    equippedHat = next.equippedHat || ""
+    equippedToy = next.equippedToy || ""
   }
 
   function persist() {
@@ -221,11 +261,24 @@ Item {
     saveTimer.restart()
   }
 
+  function accrueScore(dt) {
+    if (!root.hatched || root.carePaused) return
+    var ms = root.scoreAccruedMs + Math.max(0, dt)
+    var mins = Math.floor(ms / 60000)
+    if (mins > 0) {
+      root.score += mins
+      ms -= mins * 60000
+    }
+    root.scoreAccruedMs = ms
+  }
+
   function tick() {
+    var now = Date.now()
+    var dt = Math.max(0, Math.min(now - lastTick, 6 * 60 * 60 * 1000))
     var prevGraves = graveItems.count
     root._skipMessApply = true
     root._skipGraveApply = true
-    var next = Model.tickState(snapshot(), Date.now(), root.walking && root.shown && !root.sleeping && root.scene === "")
+    var next = Model.tickState(snapshot(), now, root.walking && root.shown && !root.sleeping && root.scene === "", root.partSet)
     if (next.graves && next.graves.length !== prevGraves) {
       root._skipGraveApply = false
       root._skipMessApply = false
@@ -233,6 +286,7 @@ Item {
     apply(next)
     root._skipMessApply = false
     root._skipGraveApply = false
+    root.accrueScore(dt)
     scheduleSave()
   }
 
@@ -250,32 +304,33 @@ Item {
   function hatch(name) {
     if (hatched) return
     naming = false
-    apply(Model.hatchPet(snapshot(), name, Date.now()))
+    apply(Model.hatchPet(snapshot(), name, Date.now(), root.partSet))
     persist()
   }
 
   function feed() {
     if (!hatched) { beginHatch(); return }
-    apply(Model.feed(snapshot(), Date.now()))
+    apply(Model.feed(snapshot(), Date.now(), root.partSet))
     poopBoostUntil = Date.now() + 3 * 60 * 1000
     persist()
   }
 
   function play() {
     if (!hatched) { beginHatch(); return }
-    apply(Model.play(snapshot(), Date.now()))
+    if (root.carePaused) return
+    apply(Model.play(snapshot(), Date.now(), root.partSet))
     persist()
   }
 
   function pet() {
     if (!hatched) { beginHatch(); return }
-    apply(Model.pet(snapshot(), Date.now()))
+    apply(Model.pet(snapshot(), Date.now(), root.partSet))
     persist()
   }
 
   function toggleSleep() {
     if (!hatched) return
-    apply(Model.toggleSleep(snapshot(), Date.now()))
+    apply(Model.toggleSleep(snapshot(), Date.now(), root.partSet))
     persist()
   }
 
@@ -312,38 +367,87 @@ Item {
   }
 
   function toggleMaintenance() {
-    if (!maintenance) {
-      maintenance = true
-      persist()
-      return
+    maintenance = !maintenance
+    persist()
+  }
+
+  function cycleDifficulty(dir) {
+    difficulty = Model.cycleDifficulty(difficulty, dir)
+    persist()
+  }
+
+  function toggleNoDeath() {
+    noDeath = !noDeath
+    persist()
+    if (hatched) tick()
+  }
+
+  function reloadShop() {
+    catalog.reload()
+  }
+
+  function owns(kind, id) {
+    var list = kind === "toy" ? ownedToys : ownedHats
+    if (!list) return false
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] === id) return true
     }
-    maintenance = false
-    hunger = 100
-    happiness = 100
-    energy = 100
-    sleeping = false
-    hungerEmptySince = 0
-    happyEmptySince = 0
-    cleanAll()
+    return false
+  }
+
+  function buyItem(kind, id) {
+    var item = catalog.itemById(kind, id)
+    if (!item || !item.id || item.cost <= 0) return false
+    if (root.owns(kind, id)) return false
+    if (root.score < item.cost) return false
+    root.score -= item.cost
+    if (kind === "toy") {
+      var toys = (ownedToys || []).slice()
+      toys.push(item.id)
+      ownedToys = toys
+    } else {
+      var hats = (ownedHats || []).slice()
+      hats.push(item.id)
+      ownedHats = hats
+    }
+    root.shopRev++
+    persist()
+    return true
+  }
+
+  function cycleEquip(kind, dir) {
+    var owned = kind === "toy" ? (ownedToys || []) : (ownedHats || [])
+    var ids = [""]
+    for (var i = 0; i < owned.length; i++) ids.push(owned[i])
+    var cur = kind === "toy" ? equippedToy : equippedHat
+    var idx = 0
+    for (var j = 0; j < ids.length; j++) {
+      if (ids[j] === cur) idx = j
+    }
+    var step = dir < 0 ? -1 : 1
+    idx = (idx + step + ids.length) % ids.length
+    if (kind === "toy") equippedToy = ids[idx]
+    else equippedHat = ids[idx]
+    root.shopRev++
     persist()
   }
 
   function nibble() {
-    if (!hatched) return
-    apply(Model.nibble(snapshot(), Date.now()))
+    if (!hatched || root.carePaused) return
+    apply(Model.nibble(snapshot(), Date.now(), root.partSet))
     persist()
   }
 
   function lullaby() {
-    if (!hatched) return
-    apply(Model.lullaby(snapshot(), Date.now()))
+    if (!hatched || root.carePaused) return
+    apply(Model.lullaby(snapshot(), Date.now(), root.partSet))
     persist()
   }
 
   function bath() {
-    if (!hatched) return
+    if (!hatched || root.carePaused) return
     cleanAll()
-    apply(Model.bath(snapshot(), Date.now()))
+    apply(Model.bath(snapshot(), Date.now(), root.partSet))
     persist()
   }
 
@@ -362,7 +466,7 @@ Item {
     farming = false
     root._skipMessApply = false
     root._skipGraveApply = false
-    apply(Model.farmKill(snapshot(), Date.now()))
+    apply(Model.farmKill(snapshot(), Date.now(), root.partSet))
     persist()
   }
 
@@ -387,6 +491,7 @@ Item {
   }
 
   function scoopOldest() {
+    if (root.carePaused) return false
     if (messItems.count <= 0) return false
     var idx = 0
     var oldest = messItems.get(0).bornAt
@@ -402,6 +507,7 @@ Item {
   }
 
   function cleanAll() {
+    if (root.carePaused) return
     if (messItems.count <= 0) return
     messItems.clear()
     persist()
@@ -430,6 +536,11 @@ Item {
   onPetNameChanged: scheduleSave()
   onGravesShownChanged: scheduleSave()
   onMaintenanceChanged: scheduleSave()
+  onDifficultyChanged: scheduleSave()
+  onNoDeathChanged: scheduleSave()
+  onScoreChanged: scheduleSave()
+  onEquippedHatChanged: scheduleSave()
+  onEquippedToyChanged: scheduleSave()
 
   Timer {
     id: tickTimer
@@ -468,6 +579,21 @@ Item {
     onTriggered: root.persist()
   }
 
+  ShopCatalog {
+    id: catalog
+    home: root.home
+  }
+
+  PartsCatalog {
+    id: partsCatalog
+    home: root.home
+    onPartSetChanged: {
+      if (root._hydrating || !root._loaded || !root.hatched) return
+      var g = Model.normalizeGenome(root.genome, root.partSet)
+      if (!Model.genomesEqual(root.genome, g)) root.genome = g
+    }
+  }
+
   FileView {
     id: stateFile
     path: root.statePath
@@ -477,7 +603,7 @@ Item {
     onLoaded: {
       root._hydrating = true
       try {
-        root.apply(Model.normalizeState(JSON.parse(text() || "{}"), Date.now()))
+        root.apply(Model.normalizeState(JSON.parse(text() || "{}"), Date.now(), root.partSet))
       } catch (e) {
         root.apply(Model.defaultState(Date.now()))
       }
@@ -511,12 +637,9 @@ Item {
     function hatch(name: string): string { root.hatch(name); return root.petName }
     function farm(): string { root.beginFarm(); return "ok" }
     function die(): string {
-      var snap = root.snapshot()
-      snap.hunger = 0
-      snap.hungerEmptySince = Date.now() - (12 * 60 * 1000 + 5000)
       root._skipMessApply = false
       root._skipGraveApply = false
-      root.apply(Model.tickState(snap, Date.now(), false))
+      root.apply(Model.killPet(root.snapshot(), Date.now(), "starved", root.partSet))
       root.persist()
       return root.petName
     }
