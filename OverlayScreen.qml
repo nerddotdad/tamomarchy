@@ -37,7 +37,7 @@ PanelWindow {
   }
 
   WlrLayershell.namespace: "tamomarchy"
-  WlrLayershell.layer: WlrLayer.Overlay
+  WlrLayershell.layer: WlrLayer.Top
   WlrLayershell.keyboardFocus: takeKeys ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
   exclusionMode: ExclusionMode.Ignore
 
