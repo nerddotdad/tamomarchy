@@ -165,6 +165,9 @@ Panel {
 
             Text {
               text: root.inShop ? "Shop" : (root.isEgg ? "An egg" : (root.livePet ? root.livePet.petName : "tamOmarchy"))
+              textFormat: Text.PlainText
+              elide: Text.ElideRight
+              width: parent.width
               color: root.contentForeground
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.subtitle
@@ -302,6 +305,8 @@ Panel {
                 width: parent.width - Style.space(88)
                 height: parent.height
                 text: root.hatLabel
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
                 color: root.contentForeground
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -336,6 +341,8 @@ Panel {
                 width: parent.width - Style.space(88)
                 height: parent.height
                 text: root.toyLabel
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
                 color: root.contentForeground
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -632,6 +639,7 @@ Panel {
                     Text {
                       width: parent.width
                       text: modelData && modelData.name ? modelData.name : ""
+                      textFormat: Text.PlainText
                       color: root.contentForeground
                       font.family: root.contentFontFamily
                       font.pixelSize: Style.font.bodySmall

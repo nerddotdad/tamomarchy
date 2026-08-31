@@ -86,6 +86,7 @@ Item {
     width: Math.max(root.width, 220)
     horizontalAlignment: Text.AlignHCenter
     text: "Grate " + root.petName
+    textFormat: Text.PlainText
     color: Color.foreground
     font.family: Style.font.family
     font.pixelSize: Style.font.subtitle

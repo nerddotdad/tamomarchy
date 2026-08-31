@@ -16,6 +16,12 @@ Item {
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string statePath: home + "/.local/state/omarchy/tamagotchi.json"
+  readonly property int stateCap: 262144
+  readonly property string stateHelper: {
+    var u = String(Qt.resolvedUrl("scripts/state-file.py"))
+    if (u.indexOf("file://") === 0) u = u.substring(7)
+    return u
+  }
 
   property string petName: ""
   property bool hatched: false
@@ -284,9 +290,17 @@ Item {
 
   function persist() {
     if (root._hydrating || !root._loaded) return
+    if (stateWrite.running) {
+      saveTimer.restart()
+      return
+    }
     var snap = snapshot()
     delete snap.dropOutput
-    stateFile.setText(JSON.stringify(snap, null, 2) + "\n")
+    var blob = JSON.stringify(snap, null, 2) + "\n"
+    if (blob.length > root.stateCap) return
+    stateWrite.payload = blob
+    stateWrite.stdinEnabled = true
+    stateWrite.running = true
   }
 
   function pinHomelessGraves(output) {
@@ -721,30 +735,49 @@ Item {
     }
   }
 
-  FileView {
-    id: stateFile
-    path: root.statePath
-    watchChanges: false
-    atomicWrites: true
-    printErrors: false
-    onLoaded: {
-      root._hydrating = true
+  function ingestState(code, raw) {
+    if (root._loaded) return
+    root._hydrating = true
+    var next = null
+    if (code === 0) {
       try {
-        root.apply(Model.normalizeState(JSON.parse(text() || "{}"), Date.now(), root.partSet))
+        next = Model.normalizeState(JSON.parse(raw || "{}"), Date.now(), root.partSet)
       } catch (e) {
-        root.apply(Model.defaultState(Date.now()))
+        next = Model.defaultState(Date.now())
       }
-      root._loaded = true
-      root._hydrating = false
-      root.tick()
+    } else {
+      next = Model.defaultState(Date.now())
     }
-    onLoadFailed: {
-      root._hydrating = true
-      root.apply(Model.defaultState(Date.now()))
-      root._loaded = true
-      root._hydrating = false
-      root.persist()
+    root.apply(next)
+    root._loaded = true
+    root._hydrating = false
+    if (code === 2) root.persist()
+    else root.tick()
+  }
+
+  Process {
+    id: stateRead
+    running: !!root.home && !!root.stateHelper
+    command: ["python3", root.stateHelper, "read", root.statePath, String(root.stateCap)]
+    stdout: StdioCollector {
+      id: stateReadOut
+      waitForEnd: true
     }
+    onExited: function(exitCode) {
+      root.ingestState(exitCode, stateReadOut.text)
+    }
+  }
+
+  Process {
+    id: stateWrite
+    property string payload: ""
+    stdinEnabled: true
+    command: ["python3", root.stateHelper, "write", root.statePath, String(root.stateCap)]
+    onStarted: {
+      write(payload)
+      stdinEnabled = false
+    }
+    onExited: stdinEnabled = true
   }
 
   IpcHandler {

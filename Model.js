@@ -8,6 +8,7 @@
 // Tamagotchi stats, mood, and stitched part sprites (Looks/parts/*/*.md).
 
 var STAT_MAX = 100
+var NAME_MAX = 18
 
 // Wallet is stored as copper. 100 copper = 1 silver, 100 silver = 1 gold.
 var COPPER_PER_SILVER = 100
@@ -153,7 +154,7 @@ function normalizeGraves(raw, parts) {
     var cause = g.cause === "lonely" || g.cause === "farm" ? g.cause : "starved"
     var genome = hasGenome(g.genome) ? normalizeGenome(g.genome, parts) : genomeFromAppearance(g.appearance)
     out.push({
-      name: String(g.name || "Mochi"),
+      name: hatchName(g.name),
       genome: genome,
       bornAt: isFinite(born) && born > 0 ? born : died,
       diedAt: died,
@@ -282,7 +283,7 @@ function emptySince(current, isEmpty, now) {
 function hatchName(name) {
   var s = String(name || "").replace(/^\s+|\s+$/g, "")
   if (!s) s = "Mochi"
-  if (s.length > 18) s = s.substring(0, 18)
+  if (s.length > NAME_MAX) s = s.substring(0, NAME_MAX)
   return s
 }
 
@@ -414,7 +415,7 @@ function normalizeState(raw, now, parts) {
     || (raw.hatched !== false && raw.name && String(raw.name).length > 0)
   if (living) {
     base.hatched = true
-    base.name = String(raw.name || "Mochi")
+    base.name = hatchName(raw.name)
     base.genome = hasGenome(raw.genome) ? normalizeGenome(raw.genome, parts) : genomeFromAppearance(raw.appearance)
   } else {
     base.hatched = false

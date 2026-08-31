@@ -1,6 +1,5 @@
 import QtQuick
 import Quickshell
-import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -18,15 +17,6 @@ BarWidget {
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
-
-  function qmlPath(name) {
-    return String(Qt.resolvedUrl(name)).replace(/^file:\/\//, "")
-  }
-
-  function remountPanel() {
-    panelLoader.active = false
-    Qt.callLater(function() { panelLoader.active = true })
-  }
 
   function open() {
     if (panelLoader.item) panelLoader.item.open()
@@ -57,13 +47,6 @@ BarWidget {
 
   onBarChanged: injectPanel()
   onPetChanged: injectPanel()
-
-  FileView {
-    path: root.qmlPath("Panel.qml")
-    watchChanges: true
-    printErrors: false
-    onFileChanged: root.remountPanel()
-  }
 
   Loader {
     id: panelLoader
