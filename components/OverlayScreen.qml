@@ -28,6 +28,11 @@ PanelWindow {
     var w = bubble.width
     var left = panel.localPetX - w - panel.bubbleGap
     var right = panel.localPetX + host.spriteW + panel.bubbleGap + w
+    if (host.watching) {
+      if (left >= 0) return true
+      if (right <= panel.width) return false
+      return true
+    }
     if (host.facingLeft) {
       if (left >= 0) return true
       if (right <= panel.width) return false
@@ -681,14 +686,15 @@ PanelWindow {
     Text {
       required property real nx
       required property real ny
+      required property real nside
       required property double born
-      visible: nx >= panel.originX - 20 && nx <= panel.originX + panel.width + 20
+      visible: nx >= panel.originX - 40 && nx <= panel.originX + panel.width + 40
       text: Math.floor((host.nowMs + born) / 400) % 2 === 0 ? "♪" : "♫"
       color: Color.accent
       font.pixelSize: Style.font.caption
       opacity: Math.max(0, 1 - (host.nowMs - born) / 1100)
-      x: nx - panel.originX
-      y: ny - panel.originY - ((host.nowMs - born) / 1100) * 36
+      x: nx - panel.originX + (Number(nside) || 1) * ((host.nowMs - born) / 1100) * 28
+      y: ny - panel.originY - ((host.nowMs - born) / 1100) * 22
       z: 21
     }
   }

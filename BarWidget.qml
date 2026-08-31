@@ -68,9 +68,7 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: ""
-    tooltipText: pet
-      ? (pet.hatched ? (pet.petName + " · " + pet.moodLabel) : "An egg · tap to hatch")
-      : "tamOmarchy"
+    tooltipText: "tamOmarchy"
     hasVisualContent: true
     keepSpace: true
     fixedWidth: root.vertical ? -1 : spriteBox.width + Style.space(16)
@@ -92,10 +90,7 @@ BarWidget {
         frame: (root.pose === "walk" || root.pose === "dance") ? barShopTick.frame % 2 : 0
         hatched: pet ? pet.hatched : false
         genome: pet ? pet.genome : null
-        shopHat: pet ? pet.hatItem : null
-        shopToy: pet ? pet.toyItem : null
         parts: pet ? pet.partSet : null
-        shopFrame: barShopTick.frame
         dirty: pet ? pet.dirty : 0
         bodyColor: root.bar ? root.bar.barForeground : Color.accent
         lineColor: root.bar ? Qt.darker(root.bar.barForeground, 1.25) : Qt.darker(Color.accent, 1.35)

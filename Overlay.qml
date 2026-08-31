@@ -1391,9 +1391,13 @@ Item {
     repeat: true
     running: root.opened && root.dancing
     onTriggered: {
+      var side = Math.random() < 0.5 ? -1 : 1
       notes.append({
-        nx: root.petX + spriteW * (0.2 + Math.random() * 0.7),
-        ny: root.petY - 4,
+        nx: side < 0
+          ? root.petX - 10 - Math.random() * 16
+          : root.petX + spriteW + 6 + Math.random() * 16,
+        ny: root.petY + spriteH * 0.22 + Math.random() * spriteH * 0.28,
+        nside: side,
         born: Date.now()
       })
     }

@@ -205,19 +205,16 @@ Panel {
           Item {
             visible: !root.inShop
             width: parent.width
-            height: skinSprite.height
+            height: Math.max(skinSprite.height, statsCol.visible ? statsCol.implicitHeight : 0)
 
             PetSprite {
               id: skinSprite
-              anchors.horizontalCenter: parent.horizontalCenter
-              anchors.top: parent.top
+              x: root.isEgg ? Math.round((parent.width - width) / 2) : 0
+              anchors.bottom: parent.bottom
               pixelSize: 6
               hatched: root.livePet ? root.livePet.hatched : false
               genome: root.livePet ? root.livePet.genome : null
-              shopHat: root.livePet ? root.livePet.hatItem : null
-              shopToy: root.livePet ? root.livePet.toyItem : null
               parts: root.livePet ? root.livePet.partSet : null
-              shopFrame: dressTick.frame
               dirty: root.livePet ? root.livePet.dirty : 0
               pose: {
                 if (root.isEgg) return "walk"
@@ -228,6 +225,73 @@ Panel {
               }
               frame: root.isEgg ? eggWobble.frame : dressTick.frame
               bodyColor: Color.accent
+            }
+
+            Column {
+              id: statsCol
+              visible: !root.isEgg
+              anchors.left: parent.left
+              anchors.leftMargin: skinSprite.width + Style.space(12)
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(6)
+
+              Repeater {
+                model: [
+                  { label: "HUNGER", value: root.livePet ? root.livePet.hunger : 0, invert: false },
+                  { label: "MOOD", value: root.livePet ? root.livePet.happiness : 0, invert: false },
+                  { label: "ENERGY", value: root.livePet ? root.livePet.energy : 0, invert: false },
+                  { label: "DIRTY", value: root.livePet ? root.livePet.dirty : 0, invert: true },
+                  { label: "POTTY", value: root.livePet ? root.livePet.pottyPct : 0, invert: true }
+                ]
+
+                Item {
+                  required property var modelData
+                  width: statsCol.width
+                  height: Math.max(meterLabel.implicitHeight, Style.space(10))
+
+                  Text {
+                    id: meterLabel
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(58)
+                    text: modelData.label
+                    color: Qt.darker(root.contentForeground, 1.5)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.letterSpacing: 1
+                  }
+
+                  Text {
+                    id: meterPct
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: Math.round(modelData.value) + "%"
+                    color: root.contentForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                  }
+
+                  Rectangle {
+                    anchors.left: meterLabel.right
+                    anchors.right: meterPct.left
+                    anchors.leftMargin: Style.space(8)
+                    anchors.rightMargin: Style.space(8)
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: Style.space(6)
+                    radius: Style.cornerRadius > 0 ? height / 2 : 0
+                    color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12)
+
+                    Rectangle {
+                      width: Math.round(parent.width * Math.max(0, Math.min(1, modelData.value / 100)))
+                      height: parent.height
+                      radius: parent.radius
+                      color: root.meterColor(modelData.value, modelData.invert)
+                      Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                    }
+                  }
+                }
+              }
             }
 
             Timer {
@@ -301,8 +365,22 @@ Panel {
                 onClicked: if (root.livePet) root.livePet.cycleEquip("hat", -1)
               }
 
+              PetSprite {
+                id: hatThumb
+                visible: !!(root.livePet && root.livePet.hatItem)
+                width: visible ? implicitWidth : 0
+                height: visible ? implicitHeight : 0
+                anchors.verticalCenter: parent.verticalCenter
+                pixelSize: 3
+                itemOnly: true
+                cropEmpty: true
+                shopHat: root.livePet ? root.livePet.hatItem : null
+                shopFrame: dressTick.frame
+                bodyColor: Color.accent
+              }
+
               Text {
-                width: parent.width - Style.space(88)
+                width: parent.width - Style.space(88) - (hatThumb.visible ? hatThumb.width + parent.spacing : 0)
                 height: parent.height
                 text: root.hatLabel
                 textFormat: Text.PlainText
@@ -337,8 +415,22 @@ Panel {
                 onClicked: if (root.livePet) root.livePet.cycleEquip("toy", -1)
               }
 
+              PetSprite {
+                id: toyThumb
+                visible: !!(root.livePet && root.livePet.toyItem)
+                width: visible ? implicitWidth : 0
+                height: visible ? implicitHeight : 0
+                anchors.verticalCenter: parent.verticalCenter
+                pixelSize: 3
+                itemOnly: true
+                cropEmpty: true
+                shopToy: root.livePet ? root.livePet.toyItem : null
+                shopFrame: dressTick.frame
+                bodyColor: Color.accent
+              }
+
               Text {
-                width: parent.width - Style.space(88)
+                width: parent.width - Style.space(88) - (toyThumb.visible ? toyThumb.width + parent.spacing : 0)
                 height: parent.height
                 text: root.toyLabel
                 textFormat: Text.PlainText
@@ -358,6 +450,19 @@ Panel {
                 fontFamily: root.contentFontFamily
                 onClicked: if (root.livePet) root.livePet.cycleEquip("toy", 1)
               }
+            }
+
+            Button {
+              width: parent.width
+              text: "Shop"
+              bordered: true
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: root.openShop()
+            }
+
+            PanelSeparator {
+              foreground: root.contentForeground
             }
 
             Row {
@@ -394,67 +499,34 @@ Panel {
               }
             }
 
-            Repeater {
-              model: [
-                { label: "HUNGER", value: root.livePet ? root.livePet.hunger : 0, invert: false },
-                { label: "MOOD", value: root.livePet ? root.livePet.happiness : 0, invert: false },
-                { label: "ENERGY", value: root.livePet ? root.livePet.energy : 0, invert: false },
-                { label: "DIRTY", value: root.livePet ? root.livePet.dirty : 0, invert: true },
-                { label: "POTTY", value: root.livePet ? root.livePet.pottyPct : 0, invert: true }
-              ]
+            Toggle {
+              width: parent.width
+              label: "Pause Care"
+              description: "Freeze stats and coins where they are. Turn off to resume care."
+              checked: root.livePet ? root.livePet.carePaused : false
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: if (root.livePet) root.livePet.toggleMaintenance()
+            }
 
-              Item {
-                required property var modelData
-                width: content.width
-                height: Math.max(meterLabel.implicitHeight, Style.space(10))
+            Toggle {
+              width: parent.width
+              label: "No Death"
+              description: "Slows currency gain"
+              checked: root.livePet ? root.livePet.noDeath : false
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: if (root.livePet) root.livePet.toggleNoDeath()
+            }
 
-                Text {
-                  id: meterLabel
-                  anchors.left: parent.left
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(58)
-                  text: modelData.label
-                  color: Qt.darker(root.contentForeground, 1.5)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.letterSpacing: 1
-                }
-
-                Text {
-                  id: meterPct
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: Math.round(modelData.value) + "%"
-                  color: root.contentForeground
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                }
-
-                Rectangle {
-                  anchors.left: meterLabel.right
-                  anchors.right: meterPct.left
-                  anchors.leftMargin: Style.space(10)
-                  anchors.rightMargin: Style.space(10)
-                  anchors.verticalCenter: parent.verticalCenter
-                  height: Style.space(6)
-                  radius: Style.cornerRadius > 0 ? height / 2 : 0
-                  color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12)
-
-                  Rectangle {
-                    width: Math.round(parent.width * Math.max(0, Math.min(1, modelData.value / 100)))
-                    height: parent.height
-                    radius: parent.radius
-                    color: root.meterColor(modelData.value, modelData.invert)
-                    Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                  }
-                }
-              }
+            PanelSeparator {
+              foreground: root.contentForeground
             }
 
             Dropdown {
               id: displayPick
               width: parent.width
-              label: "Stay on"
+              showLabel: false
               foreground: root.contentForeground
               fontFamily: root.contentFontFamily
               options: root.displayOptions
@@ -485,35 +557,6 @@ Panel {
                 fontFamily: root.contentFontFamily
                 onClicked: if (root.livePet) root.livePet.clearPen()
               }
-            }
-
-            Button {
-              width: parent.width
-              text: "Shop"
-              bordered: true
-              foreground: root.contentForeground
-              fontFamily: root.contentFontFamily
-              onClicked: root.openShop()
-            }
-
-            Toggle {
-              width: parent.width
-              label: "Pause Care"
-              description: "Freeze stats and coins where they are. Turn off to resume care."
-              checked: root.livePet ? root.livePet.carePaused : false
-              foreground: root.contentForeground
-              fontFamily: root.contentFontFamily
-              onClicked: if (root.livePet) root.livePet.toggleMaintenance()
-            }
-
-            Toggle {
-              width: parent.width
-              label: "No Death"
-              description: "Starve and lonely put them to sleep instead of dying. Copper earns every 3 minutes instead of 1. The Kill mini-game still works."
-              checked: root.livePet ? root.livePet.noDeath : false
-              foreground: root.contentForeground
-              fontFamily: root.contentFontFamily
-              onClicked: if (root.livePet) root.livePet.toggleNoDeath()
             }
 
             Toggle {

@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
+import Quickshell.Wayland
 import "Model.js" as Model
 import "catalog"
 
@@ -49,7 +50,6 @@ Item {
   property real dropY: 120
   property string dropOutput: ""
   property double poopBoostUntil: 0
-  property bool youtubeWindow: false
   property double hungerEmptySince: 0
   property double happyEmptySince: 0
   property bool _skipGraveApply: false
@@ -74,6 +74,16 @@ Item {
 
   readonly property var media: shell ? shell.firstPartyServiceFor("omarchy.media") : null
   readonly property var mprisPlayers: Mpris.players ? Mpris.players.values : []
+  readonly property bool youtubeWindow: {
+    var list = ToplevelManager.toplevels ? ToplevelManager.toplevels.values : []
+    for (var i = 0; i < list.length; i++) {
+      var t = list[i]
+      if (!t) continue
+      var blob = ((t.title || "") + " " + (t.appId || "")).toLowerCase()
+      if (blob.indexOf("youtube") !== -1) return true
+    }
+    return false
+  }
   readonly property bool youtubePlaying: {
     if (root.youtubeWindow) return true
     var p = root.media && root.media.activePlayer
@@ -87,10 +97,10 @@ Item {
   readonly property bool musicPlaying: {
     if (root.youtubePlaying) return false
     var p = root.media && root.media.activePlayer
-    if (p && p.isPlaying) return true
+    if (p && root.looksLikeMusic(p)) return true
     var list = root.mprisPlayers
     for (var i = 0; i < list.length; i++) {
-      if (list[i] && list[i].isPlaying) return true
+      if (root.looksLikeMusic(list[i])) return true
     }
     return false
   }
@@ -104,7 +114,7 @@ Item {
 
   readonly property string mood: Model.mood(snapshot())
   readonly property string moodLabel: Model.moodLabel(mood)
-  readonly property string speech: Model.speech(snapshot())
+  readonly property string speech: Model.speech(snapshot(), scene)
   readonly property string ageLabel: Model.ageLabel(bornAt, Date.now(), hatched)
   readonly property int hungerPct: Math.round(hunger)
   readonly property int happinessPct: Math.round(happiness)
@@ -144,10 +154,34 @@ Item {
   ListModel { id: graveItems }
   readonly property alias graveModel: graveItems
 
+  function playerBlob(player) {
+    if (!player) return ""
+    return ((player.identity || "") + " " + (player.desktopEntry || "") + " " + (player.dbusName || "") + " " + (player.trackTitle || "")).toLowerCase()
+  }
+
   function looksLikeYoutube(player) {
-    if (!player) return false
-    var blob = ((player.identity || "") + " " + (player.trackTitle || "") + " " + (player.desktopEntry || "")).toLowerCase()
-    return blob.indexOf("youtube") !== -1
+    return root.playerBlob(player).indexOf("youtube") !== -1
+  }
+
+  function looksLikeBrowser(player) {
+    var blob = root.playerBlob(player)
+    var keys = [
+      "firefox", "chrome", "chromium", "brave", "vivaldi", "opera",
+      "librewolf", "microsoft-edge", "msedge", "epiphany", "qutebrowser",
+      "falkon", "floorp", "waterfox", "plasma-browser-integration",
+      "zen-browser", "zen "
+    ]
+    for (var i = 0; i < keys.length; i++) {
+      if (blob.indexOf(keys[i]) !== -1) return true
+    }
+    return false
+  }
+
+  function looksLikeMusic(player) {
+    if (!player || !player.isPlaying) return false
+    if (root.looksLikeYoutube(player)) return false
+    if (root.looksLikeBrowser(player)) return false
+    return true
   }
 
   function messSnapshot() {
@@ -691,25 +725,6 @@ Item {
       root.tick()
       root.expireMess()
       root.maybeLeaveMess()
-    }
-  }
-
-  Timer {
-    id: youtubeTimer
-    interval: 2500
-    repeat: true
-    running: true
-    onTriggered: {
-      if (!youtubeProc.running) youtubeProc.running = true
-    }
-  }
-
-  Process {
-    id: youtubeProc
-    command: ["hyprctl", "clients", "-j"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.youtubeWindow = /youtube/i.test(text || "")
     }
   }
 

@@ -25,11 +25,16 @@ Item {
   property var parts: null
   property var shopGear: null
   property bool itemOnly: false
+  property bool cropEmpty: false
   property real dirty: 0
 
   readonly property int cols: Model.SPRITE_COLS
   readonly property int rows: Model.SPRITE_ROWS
-  readonly property var pixels: Model.framePixels(root.pose, root.frame, root.genome, root.hatched, root.shopHat, root.shopToy, root.shopFrame, root.parts, root.itemOnly, root.shopGear)
+  readonly property var pixels: {
+    var raw = Model.framePixels(root.pose, root.frame, root.genome, root.hatched, root.shopHat, root.shopToy, root.shopFrame, root.parts, root.itemOnly, root.shopGear)
+    if (root.cropEmpty) return Model.trimFrame(raw)
+    return raw
+  }
   readonly property int pixelRows: root.pixels && root.pixels.length ? root.pixels.length : root.rows
   readonly property int bodyOrigin: Math.max(0, root.pixelRows - root.rows)
   readonly property int hatLift: bodyOrigin * pixelSize
@@ -54,6 +59,7 @@ Item {
   onShopFrameChanged: canvas.requestPaint()
   onPartsChanged: canvas.requestPaint()
   onItemOnlyChanged: canvas.requestPaint()
+  onCropEmptyChanged: canvas.requestPaint()
   onShopGearChanged: canvas.requestPaint()
   onDirtyChanged: canvas.requestPaint()
   onPixelsChanged: canvas.requestPaint()

@@ -467,7 +467,7 @@ function moodLabel(value) {
   return "Content"
 }
 
-function speech(state) {
+function speech(state, scene) {
   if (state && state.hatched === false) return "tap to hatch"
   var m = mood(state)
   if (m === "hungry") return "feed me!"
@@ -476,6 +476,22 @@ function speech(state) {
   if (m === "sad") return "play?"
   if (m === "tired") return "zzz"
   if (m === "sleeping") return "zzz"
+  if (scene === "tv") {
+    var lines = [
+      "one more vid",
+      "don't skip",
+      "autoplay got me",
+      "this is research",
+      "just the comments",
+      "blame the algorithm",
+      "wait—2x speed",
+      "end screen trap"
+    ]
+    var t = Number(state && state.lastTick) || Date.now()
+    var i = Math.floor(t / 12000) % lines.length
+    if (i < 0) i = 0
+    return lines[i]
+  }
   return ""
 }
 
@@ -535,6 +551,16 @@ function firstPaintedRow(frame) {
   return -1
 }
 
+function trimFrame(frame) {
+  if (!frame || !frame.length) return frame
+  var first = firstPaintedRow(frame)
+  var last = paintedMaxY(frame)
+  if (first < 0) return frame
+  var out = []
+  for (var y = first; y <= last; y++) out.push(String(frame[y] || ""))
+  return out
+}
+
 function stampAt(base, overlay, dx, dy) {
   if (!overlay || !base) return base
   var out = []
@@ -573,6 +599,15 @@ function seatShopHat(canvas, hat, parts, genome, pose, frame) {
   var dy = seat - hatBottom
   var pad = dy < 0 ? -dy : 0
   return stampAt(padTop(canvas, pad), hat, 0, dy + pad)
+}
+
+function seatShopToy(canvas, toy) {
+  if (!toy || !canvas) return canvas
+  var toyBottom = paintedMaxY(toy)
+  if (toyBottom < 0) return canvas
+  var ground = paintedMaxY(canvas)
+  if (ground < 0) ground = canvas.length - 1
+  return stampAt(canvas, toy, 0, ground - toyBottom)
 }
 
 function pieceFrame(parts, slot, id, pose, frame) {
@@ -626,8 +661,8 @@ function framePixels(pose, frame, genome, hatched, shopHat, shopToy, shopFrame, 
   var canvas = compositePixels(genome, pose, frame, parts)
   if (shopHat)
     canvas = seatShopHat(canvas, Shop.shopFrame(shopHat, tick), parts, genome, pose, frame)
-  var bodyOrigin = Math.max(0, canvas.length - SPRITE_ROWS)
-  canvas = stampAt(canvas, Shop.shopFrame(shopToy, tick), 0, bodyOrigin)
+  if (shopToy)
+    canvas = seatShopToy(canvas, Shop.shopFrame(shopToy, tick))
   return canvas
 }
 
