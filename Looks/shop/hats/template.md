@@ -17,6 +17,7 @@ cost: 40
 ............
 ```
 
-Copy this file, change the title, `id`, and `cost`, then draw in the grid.
+Copy this file, change the title, `id`, and `cost` (copper), then draw in the grid.
+The bottom painted row sits on the head. Use the whole grid for a giant hat; extra rows stick up.
 Add up to four more ` ``` ` fences for animation (they loop on their own).
 Do not leave this file named `template.md` — the shop ignores that name.

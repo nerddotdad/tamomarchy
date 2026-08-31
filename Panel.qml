@@ -31,7 +31,22 @@ Panel {
   readonly property int shopRev: livePet ? livePet.shopRev : 0
   readonly property var shopItems: {
     if (!root.livePet) return []
-    return root.shopTab === "toys" ? (root.livePet.shopToys || []) : (root.livePet.shopHats || [])
+    if (root.shopTab === "toys") return root.livePet.shopToys || []
+    if (root.shopTab === "gear") return root.livePet.shopGear || []
+    return root.livePet.shopHats || []
+  }
+  readonly property var displayOptions: {
+    var opts = [{ value: "", label: "Any display" }]
+    var screens = Quickshell.screens
+    var n = screens ? screens.length : 0
+    for (var i = 0; i < n; i++) {
+      var s = screens[i]
+      if (!s || !s.name) continue
+      var w = Math.round(s.width)
+      var h = Math.round(s.height)
+      opts.push({ value: String(s.name), label: s.name + " · " + w + "×" + h })
+    }
+    return opts
   }
 
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
@@ -78,7 +93,7 @@ Panel {
   function shopButtonLabel(item) {
     if (root.shopOwned(item)) return "Owned"
     if (!item || !(item.cost > 0)) return "Buy"
-    if (!root.livePet || root.livePet.score < item.cost) return "Need more pts"
+    if (!root.livePet || root.livePet.score < item.cost) return "Need more"
     return "Buy"
   }
 
@@ -95,7 +110,11 @@ Panel {
     root.livePet.hatch(nameField.text)
   }
 
-  function meterColor(value) {
+  function meterColor(value, invert) {
+    if (invert) {
+      if (value > 75) return Color.urgent
+      return Style.selectedStateColor(root.contentForeground, Color.accent)
+    }
     if (value < 25) return Color.urgent
     return Style.selectedStateColor(root.contentForeground, Color.accent)
   }
@@ -112,13 +131,13 @@ Panel {
         Qt.callLater(function() { nameField.forceActiveFocus() })
     }
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(root.inShop ? 360 : 320))
+    contentWidth: panel.fittedContentWidth(Style.space(root.inShop ? 380 : 320))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: nameField.activeFocus
+      blocked: nameField.activeFocus || displayPick.popupOpen
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
@@ -152,11 +171,31 @@ Panel {
               font.bold: true
             }
 
-            Text {
-              text: root.livePet ? (root.points + " pts · " + root.livePet.moodLabel + " · " + root.livePet.ageLabel) : ""
-              color: Qt.darker(root.contentForeground, 1.5)
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.caption
+            Row {
+              width: parent.width
+              spacing: Style.space(6)
+
+              CoinAmount {
+                id: walletCoins
+                visible: !!root.livePet
+                copper: root.points
+                foreground: Qt.darker(root.contentForeground, 1.5)
+                fontFamily: root.contentFontFamily
+                fontSize: Style.font.caption
+                iconSize: Style.font.caption
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Text {
+                visible: !!root.livePet
+                text: "· " + root.livePet.moodLabel + " · " + root.livePet.ageLabel
+                color: Qt.darker(root.contentForeground, 1.5)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+                width: Math.max(20, parent.width - walletCoins.implicitWidth - parent.spacing)
+                anchors.verticalCenter: parent.verticalCenter
+              }
             }
           }
 
@@ -176,12 +215,11 @@ Panel {
               shopToy: root.livePet ? root.livePet.toyItem : null
               parts: root.livePet ? root.livePet.partSet : null
               shopFrame: dressTick.frame
+              dirty: root.livePet ? root.livePet.dirty : 0
               pose: {
                 if (root.isEgg) return "walk"
                 if (!root.livePet) return "idle"
                 if (root.livePet.sleeping) return "sleep"
-                if (root.livePet.toyPose === "dance") return "dance"
-                if (root.livePet.toyPose === "walk") return "walk"
                 if (root.livePet.mood === "sad") return "sad"
                 return "idle"
               }
@@ -351,9 +389,11 @@ Panel {
 
             Repeater {
               model: [
-                { label: "HUNGER", value: root.livePet ? root.livePet.hunger : 0 },
-                { label: "MOOD", value: root.livePet ? root.livePet.happiness : 0 },
-                { label: "ENERGY", value: root.livePet ? root.livePet.energy : 0 }
+                { label: "HUNGER", value: root.livePet ? root.livePet.hunger : 0, invert: false },
+                { label: "MOOD", value: root.livePet ? root.livePet.happiness : 0, invert: false },
+                { label: "ENERGY", value: root.livePet ? root.livePet.energy : 0, invert: false },
+                { label: "DIRTY", value: root.livePet ? root.livePet.dirty : 0, invert: true },
+                { label: "POTTY", value: root.livePet ? root.livePet.pottyPct : 0, invert: true }
               ]
 
               Item {
@@ -397,10 +437,23 @@ Panel {
                     width: Math.round(parent.width * Math.max(0, Math.min(1, modelData.value / 100)))
                     height: parent.height
                     radius: parent.radius
-                    color: root.meterColor(modelData.value)
+                    color: root.meterColor(modelData.value, modelData.invert)
                     Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                   }
                 }
+              }
+            }
+
+            Dropdown {
+              id: displayPick
+              width: parent.width
+              label: "Stay on"
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              options: root.displayOptions
+              value: root.livePet ? (root.livePet.confineOutput || "") : ""
+              onChanged: function(v) {
+                if (root.livePet) root.livePet.setConfineOutput(v)
               }
             }
 
@@ -439,7 +492,7 @@ Panel {
             Toggle {
               width: parent.width
               label: "Pause Care"
-              description: "Freeze stats and points where they are. Turn off to resume care."
+              description: "Freeze stats and coins where they are. Turn off to resume care."
               checked: root.livePet ? root.livePet.carePaused : false
               foreground: root.contentForeground
               fontFamily: root.contentFontFamily
@@ -449,7 +502,7 @@ Panel {
             Toggle {
               width: parent.width
               label: "No Death"
-              description: "Starve and lonely put them to sleep instead of dying. The Kill mini-game still works."
+              description: "Starve and lonely put them to sleep instead of dying. Copper earns every 3 minutes instead of 1. The Kill mini-game still works."
               checked: root.livePet ? root.livePet.noDeath : false
               foreground: root.contentForeground
               fontFamily: root.contentFontFamily
@@ -484,10 +537,10 @@ Panel {
 
             Row {
               width: parent.width
-              spacing: Style.space(8)
+              spacing: Style.space(6)
 
               Button {
-                width: (parent.width - parent.spacing) / 2
+                width: (parent.width - parent.spacing * 2) / 3
                 text: "Hats"
                 bordered: root.shopTab !== "hats"
                 foreground: root.contentForeground
@@ -496,12 +549,21 @@ Panel {
               }
 
               Button {
-                width: (parent.width - parent.spacing) / 2
+                width: (parent.width - parent.spacing * 2) / 3
                 text: "Toys"
                 bordered: root.shopTab !== "toys"
                 foreground: root.contentForeground
                 fontFamily: root.contentFontFamily
                 onClicked: root.shopTab = "toys"
+              }
+
+              Button {
+                width: (parent.width - parent.spacing * 2) / 3
+                text: "Home"
+                bordered: root.shopTab !== "gear"
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: root.shopTab = "gear"
               }
             }
 
@@ -522,6 +584,16 @@ Panel {
                   radius: Style.cornerRadius
                   color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08)
 
+                  HoverHandler {
+                    id: shopCardHover
+                  }
+
+                  PanelToolTip {
+                    visible: !!(modelData && modelData.kind === "gear" && modelData.about && shopCardHover.hovered)
+                    text: modelData && modelData.about ? modelData.about : ""
+                    fontFamily: root.contentFontFamily
+                  }
+
                   Column {
                     id: shopCard
                     width: parent.width - Style.space(16)
@@ -534,6 +606,7 @@ Panel {
                       anchors.horizontalCenter: parent.horizontalCenter
                       pixelSize: 5
                       hatched: true
+                      itemOnly: !!(modelData && modelData.kind === "gear")
                       genome: root.livePet ? root.livePet.genome : null
                       parts: root.livePet ? root.livePet.partSet : null
                       shopHat: {
@@ -541,11 +614,16 @@ Panel {
                         return root.livePet ? root.livePet.hatItem : null
                       }
                       shopToy: (modelData && modelData.kind === "toy") ? modelData : null
+                      shopGear: (modelData && modelData.kind === "gear") ? modelData : null
                       pose: {
-                        if (!modelData || modelData.kind !== "toy") return "idle"
-                        if (modelData.pose === "dance" || modelData.pose === "walk") return modelData.pose
+                        if (!modelData || modelData.kind === "gear") return "idle"
+                        if (modelData.kind !== "toy") return "idle"
+                        if (modelData.play === "jump" || modelData.play === "glide") return "walk"
+                        if (modelData.play === "spin") return "dance"
+                        if (modelData.play === "think" || modelData.play === "roll") return "sit"
                         return "idle"
                       }
+                      rotation: (modelData && modelData.play === "spin") ? shopTick.frame * 24 : 0
                       frame: shopTick.frame
                       shopFrame: shopTick.frame
                       bodyColor: Color.accent
@@ -562,8 +640,40 @@ Panel {
                     }
 
                     Text {
+                      visible: {
+                        if (!modelData) return false
+                        if (modelData.kind === "toy" && modelData.play) return true
+                        if (modelData.kind === "gear" && modelData.auto) return true
+                        return false
+                      }
                       width: parent.width
-                      text: modelData && modelData.cost > 0 ? (modelData.cost + " pts") : "—"
+                      text: {
+                        if (!modelData) return ""
+                        if (modelData.kind === "gear")
+                          return root.livePet ? root.livePet.gearAutoLabel(modelData.auto) : ""
+                        return modelData.play || ""
+                      }
+                      color: Qt.darker(root.contentForeground, 1.5)
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                      horizontalAlignment: Text.AlignHCenter
+                    }
+
+                    CoinAmount {
+                      visible: !!(modelData && modelData.cost > 0)
+                      anchors.horizontalCenter: parent.horizontalCenter
+                      copper: modelData && modelData.cost > 0 ? modelData.cost : 0
+                      emptyCopper: false
+                      foreground: Qt.darker(root.contentForeground, 1.5)
+                      fontFamily: root.contentFontFamily
+                      fontSize: Style.font.caption
+                      iconSize: Style.font.caption
+                    }
+
+                    Text {
+                      visible: !(modelData && modelData.cost > 0)
+                      width: parent.width
+                      text: "—"
                       color: Qt.darker(root.contentForeground, 1.5)
                       font.family: root.contentFontFamily
                       font.pixelSize: Style.font.caption

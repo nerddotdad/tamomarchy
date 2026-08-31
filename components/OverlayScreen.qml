@@ -22,7 +22,28 @@ PanelWindow {
     if (!host || !host.opened) return false
     return localPetX < width && localPetX + host.spriteW > 0 && localPetY < height && localPetY + host.spriteH > 0
   }
-  readonly property bool isGameScreen: host && host.gameOutput === screenName
+  readonly property int bubbleGap: 8
+  readonly property bool bubbleOnLeft: {
+    if (!host) return false
+    var w = bubble.width
+    var left = panel.localPetX - w - panel.bubbleGap
+    var right = panel.localPetX + host.spriteW + panel.bubbleGap + w
+    if (host.facingLeft) {
+      if (left >= 0) return true
+      if (right <= panel.width) return false
+      return true
+    }
+    if (right <= panel.width) return false
+    if (left >= 0) return true
+    return false
+  }
+  readonly property bool isGameScreen: host && (host.gameSpansScreens || host.gameOutput === screenName)
+  readonly property bool scoopHere: {
+    if (!host || host.game !== "scoop" || host.lastScoopX < 0) return false
+    var lx = host.lastScoopX - originX
+    var ly = host.lastScoopY - originY
+    return lx > -56 && lx < width + 56 && ly > -56 && ly < height + 56
+  }
   readonly property bool isDrawScreen: host && host.pet && host.pet.drawOnOutput === screenName
   readonly property bool takeKeys: host && ((host.drawing && isDrawScreen) || (host.naming && petHere) || (host.inGame && isGameScreen))
 
@@ -62,12 +83,36 @@ PanelWindow {
   }
 
   Repeater {
+    model: host && host.pet ? host.pet.ownedGearItems : 0
+
+    Item {
+      required property var modelData
+      required property int index
+      visible: panel.petHere && host && host.opened && !host.inGame && !host.holding
+      width: gearSprite.implicitWidth
+      height: gearSprite.implicitHeight
+      x: host.barClearance("left") + 10 + index * 50
+      y: panel.height - host.barClearance("bottom") - (host ? (host.graveRev, host.graveyardHFor(panel.screenName)) : 0) - height - 10
+      z: 3
+
+      PetSprite {
+        id: gearSprite
+        itemOnly: true
+        hatched: true
+        shopGear: modelData
+        shopFrame: host ? host.shopFrame : 0
+        pixelSize: 4
+        bodyColor: Color.accent
+      }
+    }
+  }
+
+  Repeater {
     model: host && host.pet ? host.pet.messModel : 0
 
     MessSprite {
       visible: host && host.messOnScreen(model.output, panel.screenName)
       kind: model.kind
-      pixelSize: 3
       x: model.x
       y: model.y
       z: 4
@@ -115,16 +160,16 @@ PanelWindow {
     visible: host && host.holding && host.pet && host.pet.hatched && !host.inGame && panel.screenName === host.menuOutput
     x: host.menuX
     y: host.menuY
-    width: menuRow.implicitWidth
-    height: menuRow.implicitHeight
+    width: menuCol.implicitWidth
+    height: menuCol.implicitHeight
     z: 50
 
     Text {
       visible: host.pet && (host.pet.carePaused || host.pet.crisisSleep)
-      anchors.horizontalCenter: menuRow.horizontalCenter
-      anchors.bottom: menuRow.top
+      anchors.horizontalCenter: menuCol.horizontalCenter
+      anchors.bottom: menuCol.top
       anchors.bottomMargin: 6
-      width: menuRow.implicitWidth
+      width: menuCol.implicitWidth
       text: host.pet && host.pet.crisisSleep ? "Sleeping it off. Feed or play to wake." : "Stats paused. Re-enable in the panel."
       color: Color.foreground
       font.family: Style.font.family
@@ -133,15 +178,40 @@ PanelWindow {
       horizontalAlignment: Text.AlignHCenter
     }
 
-    Row {
-      id: menuRow
-      spacing: 4
+    Column {
+      id: menuCol
+      spacing: 8
 
-      ActionIcon { glyph: "\uf236"; label: "Sleep"; lit: host.hoverAction === "sleep" }
-      ActionIcon { glyph: "\uf0f5"; label: "Eat"; lit: host.hoverAction === "eat" }
-      ActionIcon { glyph: "\uf1e3"; label: "Play"; lit: host.hoverAction === "play" }
-      ActionIcon { glyph: "\uf2cd"; label: "Bath"; lit: host.hoverAction === "bath" }
-      ActionIcon { glyph: "\uee15"; label: "Kill"; lit: host.hoverAction === "farm" }
+      Row {
+        id: menuRow
+        spacing: 4
+
+        ActionIcon { glyph: "\uf236"; label: "Sleep"; lit: host.hoverAction === "sleep" }
+        ActionIcon { glyph: "\uf0f5"; label: "Eat"; lit: host.hoverAction === "eat" }
+        ActionIcon { glyph: "\uf1e3"; label: "Play"; lit: host.hoverAction === "play" }
+        ActionIcon { glyph: "\uf2cd"; label: "Bath"; lit: host.hoverAction === "bath" }
+        ActionIcon { glyph: "\uf51a"; label: "Scoop"; lit: host.hoverAction === "scoop" }
+        ActionIcon { glyph: "\uee15"; label: "Kill"; lit: host.hoverAction === "farm" }
+      }
+
+      StatMeters {
+        width: menuRow.implicitWidth
+        pet: host.pet
+        focusStat: host.hoverFocusStat
+      }
+
+      Text {
+        width: menuRow.implicitWidth
+        height: 32
+        text: host.hoverImpact
+        color: Color.accent
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        font.bold: true
+        wrapMode: Text.WordWrap
+        horizontalAlignment: Text.AlignHCenter
+        opacity: host.hoverImpact !== "" ? 1 : 0
+      }
     }
   }
 
@@ -176,11 +246,26 @@ PanelWindow {
       text: host.game === "eat" ? "Catch the falling food"
         : host.game === "play" ? (host.ballLive ? "Fetch!" : "Click to throw")
         : host.game === "bath" ? (host.brushHeld ? "Scrub him" : "Pick up the soap")
+        : host.game === "scoop" ? (host.scoopHeld ? "Move over mess — click to put down" : "Pick up the scooper")
         : "Drag him up and down the grater"
       color: Color.foreground
       font.family: Style.font.family
       font.pixelSize: Style.font.subtitle
       font.bold: true
+    }
+
+    StatMeters {
+      anchors.horizontalCenter: parent.horizontalCenter
+      anchors.top: parent.top
+      anchors.topMargin: host.barClearance("top") + (host.game === "sleep" ? 32 : 58)
+      width: Math.min(420, parent.width * 0.55)
+      pet: host.pet
+      focusStat: host.game === "eat" ? "hunger"
+        : host.game === "play" ? "mood"
+        : host.game === "bath" ? "dirty"
+        : host.game === "sleep" ? "energy"
+        : host.game === "scoop" ? "potty"
+        : ""
     }
 
     Repeater {
@@ -248,6 +333,38 @@ PanelWindow {
       }
     }
 
+    Item {
+      visible: panel.scoopHere
+      width: 56
+      height: 56
+      x: host.lastScoopX - panel.originX - width / 2
+      y: host.lastScoopY - panel.originY - height / 2
+      z: 63
+      rotation: host.scoopHeld ? -18 : 0
+      scale: host.scoopHeld ? 1.08 : (1 + 0.07 * Math.sin(host.nowMs / 200))
+
+      Rectangle {
+        visible: !host.scoopHeld
+        anchors.centerIn: parent
+        width: 54
+        height: 54
+        radius: 27
+        color: Color.popups.background
+        border.width: 2
+        border.color: Color.accent
+      }
+
+      ThemeSvg {
+        anchors.centerIn: parent
+        width: 34
+        height: 34
+        source: Qt.resolvedUrl("../icons/scoop.svg")
+        sourceSize.width: 68
+        sourceSize.height: 68
+        tint: Color.foreground
+      }
+    }
+
     MouseArea {
       id: gameCatcher
       anchors.fill: parent
@@ -262,6 +379,11 @@ PanelWindow {
         if (host.game === "bath") {
           if (host.brushHeld) return Qt.ClosedHandCursor
           if (containsMouse && host.nearBrush(mouseX, mouseY)) return Qt.OpenHandCursor
+          return Qt.ArrowCursor
+        }
+        if (host.game === "scoop") {
+          if (host.scoopHeld) return Qt.ClosedHandCursor
+          if (containsMouse && host.nearScoop(panel.originX + mouseX, panel.originY + mouseY)) return Qt.OpenHandCursor
           return Qt.ArrowCursor
         }
         return Qt.ClosedHandCursor
@@ -287,11 +409,32 @@ PanelWindow {
             host.scrubAt(mouse.x, mouse.y)
           return
         }
+        if (host.game === "scoop") {
+          if (host.scoopHeld) {
+            host.scoopAt(panel.originX + mouse.x, panel.originY + mouse.y)
+            host.scoopHeld = false
+            return
+          }
+          if (host.nearScoop(panel.originX + mouse.x, panel.originY + mouse.y)) {
+            host.scoopHeld = true
+            host.playSoapPickup()
+            host.scoopAt(panel.originX + mouse.x, panel.originY + mouse.y)
+          }
+          return
+        }
         host.grabOffX = mouse.x - panel.localPetX
         host.grabOffY = mouse.y - panel.localPetY
         host.holding = true
       }
+      onEntered: {
+        if (host.game === "scoop" && host.scoopHeld)
+          host.scoopAt(panel.originX + mouseX, panel.originY + mouseY)
+      }
       onPositionChanged: function(mouse) {
+        if (host.game === "scoop" && host.scoopHeld) {
+          host.scoopAt(panel.originX + mouse.x, panel.originY + mouse.y)
+          return
+        }
         if (!pressed && !host.holding && !host.brushHeld) return
         if (host.game === "eat" || host.game === "farm")
           host.putPet(panel.originX + mouse.x - host.grabOffX, panel.originY + mouse.y - host.grabOffY)
@@ -304,6 +447,8 @@ PanelWindow {
           host.brushHeld = false
           return
         }
+        if (host.game === "scoop")
+          return
         if (host.game !== "play")
           host.holding = false
       }
@@ -367,33 +512,11 @@ PanelWindow {
     id: hitArea
     visible: panel.petHere
     x: Math.round(panel.localPetX)
-    y: Math.round(panel.localPetY - host.bounceY - (bubble.visible ? bubble.height + 6 : 0))
-    width: Math.max(host.spriteW, bubble.visible ? bubble.width : 0)
-    height: host.spriteH + (bubble.visible ? bubble.height + 6 : 0)
+    y: Math.round(panel.localPetY - host.bounceY - sprite.hatLift)
+    width: host.spriteW
+    height: host.spriteH + sprite.hatLift
     opacity: host && host.opened ? 1 : 0
     z: host && host.inGame ? 40 : 100
-
-    Rectangle {
-      id: bubble
-      visible: host && host.pet && host.pet.speech !== "" && !host.moving
-      anchors.top: parent.top
-      anchors.horizontalCenter: parent.horizontalCenter
-      width: bubbleText.implicitWidth + Style.space(12)
-      height: visible ? bubbleText.implicitHeight + Style.space(8) : 0
-      radius: Style.cornerRadius
-      color: Color.popups.background
-      border.width: Style.spacing.hairline
-      border.color: Color.popups.border
-
-      Text {
-        id: bubbleText
-        anchors.centerIn: parent
-        text: host && host.pet ? host.pet.speech : ""
-        color: Color.popups.text
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-      }
-    }
 
     Rectangle {
       width: host.spriteW * 0.55
@@ -413,14 +536,60 @@ PanelWindow {
       pose: host.pose
       frame: host.walkFrame
       facingLeft: host.facingLeft
+      rotation: host.petRot
+      transformOrigin: Item.Center
       hatched: host.pet ? host.pet.hatched : false
       genome: host.pet ? host.pet.genome : null
       shopHat: host.pet ? host.pet.hatItem : null
-      shopToy: host.pet ? host.pet.toyItem : null
+      shopToy: null
       parts: host.pet ? host.pet.partSet : null
       shopFrame: host.shopFrame
+      dirty: host.pet ? host.pet.dirty : 0
       bodyColor: Color.accent
     }
+  }
+
+  Rectangle {
+    id: bubble
+    visible: panel.petHere && host && host.pet && host.pet.speech !== "" && !host.moving
+    x: panel.bubbleOnLeft
+      ? Math.round(panel.localPetX - width - panel.bubbleGap)
+      : Math.round(panel.localPetX + host.spriteW + panel.bubbleGap)
+    y: Math.round(panel.localPetY - host.bounceY + host.spriteH * 0.12 - height / 2)
+    width: bubbleText.implicitWidth + Style.space(12)
+    height: visible ? bubbleText.implicitHeight + Style.space(8) : 0
+    radius: Style.cornerRadius
+    z: 101
+    color: Color.popups.background
+    border.width: Style.spacing.hairline
+    border.color: Color.popups.border
+
+    Text {
+      id: bubbleText
+      anchors.centerIn: parent
+      text: host && host.pet ? host.pet.speech : ""
+      color: Color.popups.text
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+  }
+
+  PetSprite {
+    id: toySprite
+    visible: panel.petHere && host && host.toyVisible
+    x: panel.localPetX + host.toyDrawX
+    y: panel.localPetY - host.bounceY + host.toyDrawY
+    z: 102
+    pixelSize: host.spriteScale
+    facingLeft: host.toyFacingLeft
+    rotation: host.toyRot
+    scale: host.toyScale
+    transformOrigin: Item.Center
+    hatched: true
+    itemOnly: true
+    shopToy: host.pet ? host.pet.toyItem : null
+    shopFrame: host.shopFrame
+    bodyColor: Color.accent
   }
 
   MouseArea {
@@ -460,18 +629,20 @@ PanelWindow {
 
   Item {
     id: graveyard
-    visible: host && host.showGraves && panel.petHere
+    visible: host && host.showGraves && (host.graveRev, host.gravesOnScreen(panel.screenName))
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.bottom: parent.bottom
     anchors.bottomMargin: host.barClearance("bottom")
-    height: visible ? 56 : 0
+    height: visible ? host.graveyardSize : 0
     z: 5
 
     Repeater {
       model: host && host.pet ? host.pet.graveModel : 0
 
       GraveSprite {
+        readonly property int slot: host ? host.graveSlot(index, panel.screenName) : index
+        visible: host && host.graveOnScreen(model.output, panel.screenName)
         petName: model.name
         cause: model.cause
         bornAt: model.bornAt
@@ -480,10 +651,10 @@ PanelWindow {
         graveIndex: index
         tilt: Model.graveTilt(index, model.diedAt)
         lean: Model.graveLean(index)
-        x: Model.graveX(index, graveyard.width)
+        x: Model.graveX(slot, graveyard.width)
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: Model.graveLift(index) + Model.graveRow(index, graveyard.width) * 22
-        z: index + 1
+        anchors.bottomMargin: Model.graveLift(index) + Model.graveRow(slot, graveyard.width) * 22
+        z: slot + 1
       }
     }
   }

@@ -1,6 +1,6 @@
 # Part name
 
-id: my-hat
+id: my-horn
 
 ## idle
 
@@ -18,5 +18,5 @@ id: my-hat
 ............
 ```
 
-Hatch hat (rows 0–2). This is the genome hat, not a shop hat.
+Horns layer (rows 0–2): sprout, horns, bow, and other head extras. Not a shop hat.
 Copy this file, change `id`, and draw. Do not leave this named `template.md`.

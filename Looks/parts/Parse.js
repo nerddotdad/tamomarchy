@@ -3,7 +3,7 @@
 
 // Creature part markdown. Each file is one part; ## headings are poses.
 
-var SLOTS = ["bodies", "heads", "hats", "arms", "legs", "tails"]
+var SLOTS = ["bodies", "heads", "horns", "arms", "legs", "tails"]
 
 function poseKey(title) {
   var t = Md.trim(title).toLowerCase().replace(/\s+/g, "")

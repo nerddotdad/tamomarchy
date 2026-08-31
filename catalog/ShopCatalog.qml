@@ -1,7 +1,7 @@
 import QtQuick
 import "../Looks/shop/Parse.js" as Shop
 
-// Reads Looks/shop/{hats,toys}/*.md and optional user copies under
+// Reads Looks/shop/{hats,toys,gear}/*.md and optional user copies under
 // ~/.config/omarchy/tamomarchy/shop/. template.md is skipped.
 Item {
   id: root
@@ -9,9 +9,11 @@ Item {
   property string home: ""
   property var hats: []
   property var toys: []
+  property var gear: []
 
   function itemById(kind, id) {
-    return Shop.findById(kind === "toy" ? root.toys : root.hats, id)
+    var list = kind === "toy" ? root.toys : kind === "gear" ? root.gear : root.hats
+    return Shop.findById(list, id)
   }
 
   function userFolder(kind) {
@@ -20,7 +22,7 @@ Item {
   }
 
   function dump() {
-    var folders = [pluginHats, pluginToys, userHats, userToys]
+    var folders = [pluginHats, pluginToys, pluginGear, userHats, userToys, userGear]
     var blob = ""
     for (var i = 0; i < folders.length; i++) {
       var folder = folders[i]
@@ -41,13 +43,16 @@ Item {
     var next = Shop.parseBundle(root.dump())
     root.hats = next.hats || []
     root.toys = next.toys || []
+    root.gear = next.gear || []
   }
 
   function reload() {
     pluginHats.refresh()
     pluginToys.refresh()
+    pluginGear.refresh()
     userHats.refresh()
     userToys.refresh()
+    userGear.refresh()
   }
 
   Timer {
@@ -74,6 +79,13 @@ Item {
   }
 
   MdFolder {
+    id: pluginGear
+    tag: "gear"
+    folder: Qt.resolvedUrl("../Looks/shop/gear")
+    onUpdated: root.schedule()
+  }
+
+  MdFolder {
     id: userHats
     tag: "hats"
     folder: root.userFolder("hats")
@@ -84,6 +96,13 @@ Item {
     id: userToys
     tag: "toys"
     folder: root.userFolder("toys")
+    onUpdated: root.schedule()
+  }
+
+  MdFolder {
+    id: userGear
+    tag: "gear"
+    folder: root.userFolder("gear")
     onUpdated: root.schedule()
   }
 }

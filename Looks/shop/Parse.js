@@ -3,10 +3,53 @@
 
 // Parse hat/toy markdown. One file can hold several items (each starts with #).
 
-var POSES = { idle: true, walk: true, dance: true, jump: true }
+var PLAYS = { roll: true, glide: true, jump: true, spin: true, throw: true, think: true }
+
+var AUTOS = { hunger: true, potty: true, dirty: true, energy: true, mood: true }
+
+function normalizePlay(play, pose, kind) {
+  if (kind === "hat" || kind === "gear") return ""
+  var s = String(play || pose || "").toLowerCase()
+  if (PLAYS[s]) return s
+  if (s === "dance" || s === "walk") return "roll"
+  if (s === "jump") return "jump"
+  return "think"
+}
+
+function normalizeAuto(auto, kind) {
+  if (kind !== "gear") return ""
+  var s = String(auto || "").toLowerCase()
+  if (AUTOS[s]) return s
+  if (s === "food" || s === "eat") return "hunger"
+  if (s === "scoop" || s === "mess") return "potty"
+  if (s === "bath" || s === "wash") return "dirty"
+  if (s === "sleep" || s === "bed") return "energy"
+  if (s === "play" || s === "happy") return "mood"
+  return ""
+}
+
+function autoLabel(auto) {
+  if (auto === "hunger") return "Hunger"
+  if (auto === "potty") return "Potty"
+  if (auto === "dirty") return "Dirty"
+  if (auto === "energy") return "Sleep"
+  if (auto === "mood") return "Play"
+  return ""
+}
+
+function autoAbout(auto) {
+  if (auto === "hunger") return "Hunger slowly refills on its own. The Eat mini-game is optional."
+  if (auto === "potty") return "They use this instead of the floor. No more scooping."
+  if (auto === "dirty") return "They wash themselves. Dirty fades without a Bath mini-game."
+  if (auto === "energy") return "They put themselves to bed when tired and wake when rested."
+  if (auto === "mood") return "Mood slowly recovers while they are up. The Play mini-game is optional."
+  return ""
+}
 
 function kindFrom(folder, fallback) {
-  if (folder === "toys" || folder === "toy" || fallback === "toy") return "toy"
+  var s = String(folder || fallback || "")
+  if (s === "toys" || s === "toy") return "toy"
+  if (s === "gear" || s === "utility" || s === "utilities") return "gear"
   return "hat"
 }
 
@@ -16,7 +59,9 @@ function parseSection(text, fallbackKind) {
     name: "",
     kind: kindFrom(fallbackKind),
     cost: 0,
-    pose: "idle",
+    play: "think",
+    auto: "",
+    about: "",
     frames: []
   }
   var lines = String(text || "").split("\n")
@@ -39,7 +84,12 @@ function parseSection(text, fallbackKind) {
       else if (meta.key === "name") item.name = meta.val
       else if (meta.key === "kind") item.kind = kindFrom(meta.val, item.kind)
       else if (meta.key === "cost") item.cost = Number(meta.val)
-      else if (meta.key === "pose" && POSES[meta.val]) item.pose = meta.val
+      else if (meta.key === "play" || meta.key === "animation" || meta.key === "pose")
+        item.play = meta.val
+      else if (meta.key === "auto" || meta.key === "stat" || meta.key === "covers")
+        item.auto = meta.val
+      else if (meta.key === "about" || meta.key === "blurb" || meta.key === "desc")
+        item.about = meta.val
     }
     bodyLines.push(line)
   }
@@ -50,7 +100,10 @@ function parseSection(text, fallbackKind) {
   item.name = item.name || item.id
   item.cost = Math.floor(Number(item.cost))
   if (!isFinite(item.cost) || item.cost < 0) item.cost = 0
-  if (item.kind === "hat") item.pose = "idle"
+  item.play = normalizePlay(item.play, "", item.kind)
+  item.auto = normalizeAuto(item.auto, item.kind)
+  item.about = Md.trim(item.about)
+  if (item.kind === "gear" && !item.about) item.about = autoAbout(item.auto)
   return item
 }
 
@@ -69,6 +122,7 @@ function parseDocument(text, fallbackKind) {
 function parseBundle(text) {
   var hats = []
   var toys = []
+  var gear = []
   var byId = {}
   var chunks = Md.splitMarked(text, "___TAM_ITEM___")
   for (var i = 0; i < chunks.length; i++) {
@@ -77,15 +131,19 @@ function parseBundle(text) {
     for (var j = 0; j < parsed.length; j++) {
       var item = parsed[j]
       item.kind = kindFrom(kindFolder)
+      item.play = normalizePlay(item.play, "", item.kind)
+      item.auto = normalizeAuto(item.auto, item.kind)
+      if (item.kind === "gear" && !item.about) item.about = autoAbout(item.auto)
       if (item.id) byId[item.kind + ":" + item.id] = item
     }
   }
   for (var key in byId) {
     var it = byId[key]
     if (it.kind === "toy") toys.push(it)
+    else if (it.kind === "gear") gear.push(it)
     else hats.push(it)
   }
-  return { hats: hats, toys: toys }
+  return { hats: hats, toys: toys, gear: gear }
 }
 
 function findById(list, id) {

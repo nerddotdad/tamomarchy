@@ -24,6 +24,7 @@ Item {
   property real hunger: 100
   property real happiness: 100
   property real energy: 100
+  property real dirty: 0
   property bool sleeping: false
   property bool shown: true
   property bool drawingPen: false
@@ -33,6 +34,7 @@ Item {
   property real penW: 0
   property real penH: 0
   property string penOutput: ""
+  property string confineOutput: ""
   property string drawOnOutput: ""
   property double bornAt: Date.now()
   property double lastTick: Date.now()
@@ -46,6 +48,7 @@ Item {
   property double happyEmptySince: 0
   property bool _skipGraveApply: false
   property bool gravesShown: true
+  property int graveRev: 0
   property bool maintenance: true
   property string difficulty: "medium"
   property bool noDeath: false
@@ -54,6 +57,7 @@ Item {
   property double scoreAccruedMs: 0
   property var ownedHats: []
   property var ownedToys: []
+  property var ownedGear: []
   property string equippedHat: ""
   property string equippedToy: ""
   property int shopRev: 0
@@ -99,8 +103,11 @@ Item {
   readonly property int hungerPct: Math.round(hunger)
   readonly property int happinessPct: Math.round(happiness)
   readonly property int energyPct: Math.round(energy)
+  readonly property int dirtyPct: Math.round(dirty)
   readonly property int messCount: messItems.count
+  readonly property int pottyPct: Math.round(Math.min(100, messCount * Model.POTTY_PER_MESS))
   readonly property int graveCount: graveItems.count
+  readonly property string coinLabel: Model.formatCoins(score)
   readonly property bool carePaused: maintenance === false
   readonly property string difficultyLabel: Model.difficultyLabel(difficulty)
   readonly property bool crisisSleep: Model.inCrisisSleep({
@@ -111,9 +118,19 @@ Item {
   }, lastTick)
   readonly property var shopHats: catalog.hats
   readonly property var shopToys: catalog.toys
+  readonly property var shopGear: catalog.gear
   readonly property var hatItem: catalog.itemById("hat", equippedHat)
   readonly property var toyItem: catalog.itemById("toy", equippedToy)
-  readonly property string toyPose: toyItem && toyItem.pose ? String(toyItem.pose) : ""
+  readonly property var ownedGearItems: {
+    var _ = root.shopRev
+    var list = root.shopGear || []
+    var out = []
+    for (var i = 0; i < list.length; i++) {
+      if (root.owns("gear", list[i].id)) out.push(list[i])
+    }
+    return out
+  }
+  readonly property string toyPlay: toyItem && toyItem.play ? String(toyItem.play) : ""
   readonly property var partSet: partsCatalog.partSet
 
   ListModel { id: messItems }
@@ -143,6 +160,10 @@ Item {
       messItems.append(next[i])
   }
 
+  function bumpGraves() {
+    graveRev++
+  }
+
   function replaceGraves(list) {
     graveItems.clear()
     var next = Model.normalizeGraves(list, root.partSet)
@@ -153,9 +174,11 @@ Item {
         genomeJson: JSON.stringify(g.genome || {}),
         bornAt: g.bornAt,
         diedAt: g.diedAt,
-        cause: g.cause
+        cause: g.cause,
+        output: g.output || ""
       })
     }
+    root.bumpGraves()
   }
 
   function graveSnapshot() {
@@ -167,7 +190,8 @@ Item {
         genome: root.parseGenomeJson(row.genomeJson),
         bornAt: row.bornAt,
         diedAt: row.diedAt,
-        cause: row.cause
+        cause: row.cause,
+        output: row.output || ""
       })
     }
     return out
@@ -190,9 +214,11 @@ Item {
       hunger: hunger,
       happiness: happiness,
       energy: energy,
+      dirty: dirty,
       sleeping: sleeping,
       shown: shown,
       pen: hasPen ? { x: penX, y: penY, w: penW, h: penH, output: penOutput } : null,
+      confineOutput: confineOutput,
       mess: messSnapshot(),
       graves: graveSnapshot(),
       gravesShown: gravesShown,
@@ -207,8 +233,10 @@ Item {
       scoreAccruedMs: scoreAccruedMs,
       ownedHats: ownedHats,
       ownedToys: ownedToys,
+      ownedGear: ownedGear,
       equippedHat: equippedHat,
-      equippedToy: equippedToy
+      equippedToy: equippedToy,
+      dropOutput: dropOutput
     }
   }
 
@@ -230,9 +258,11 @@ Item {
     hunger = next.hunger
     happiness = next.happiness
     energy = next.energy
+    dirty = next.dirty || 0
     sleeping = next.sleeping === true
     shown = next.shown !== false
     applyPen(next.pen)
+    confineOutput = next.confineOutput ? String(next.confineOutput) : ""
     if (!root._skipMessApply) replaceMess(next.mess)
     if (!root._skipGraveApply) replaceGraves(next.graves)
     gravesShown = next.gravesShown !== false
@@ -247,13 +277,31 @@ Item {
     scoreAccruedMs = Math.max(0, Number(next.scoreAccruedMs) || 0)
     ownedHats = next.ownedHats || []
     ownedToys = next.ownedToys || []
+    ownedGear = next.ownedGear || []
     equippedHat = next.equippedHat || ""
     equippedToy = next.equippedToy || ""
   }
 
   function persist() {
     if (root._hydrating || !root._loaded) return
-    stateFile.setText(JSON.stringify(snapshot(), null, 2) + "\n")
+    var snap = snapshot()
+    delete snap.dropOutput
+    stateFile.setText(JSON.stringify(snap, null, 2) + "\n")
+  }
+
+  function pinHomelessGraves(output) {
+    var where = output ? String(output) : ""
+    if (!where || graveItems.count <= 0) return
+    var changed = false
+    for (var i = 0; i < graveItems.count; i++) {
+      if (graveItems.get(i).output) continue
+      graveItems.setProperty(i, "output", where)
+      changed = true
+    }
+    if (changed) {
+      persist()
+      root.bumpGraves()
+    }
   }
 
   function scheduleSave() {
@@ -263,11 +311,13 @@ Item {
 
   function accrueScore(dt) {
     if (!root.hatched || root.carePaused) return
+    var unit = Model.COPPER_ACCRUE_MS
+    if (root.noDeath) unit *= Model.COPPER_NODEATH_MULT
     var ms = root.scoreAccruedMs + Math.max(0, dt)
-    var mins = Math.floor(ms / 60000)
-    if (mins > 0) {
-      root.score += mins
-      ms -= mins * 60000
+    var n = Math.floor(ms / unit)
+    if (n > 0) {
+      root.score += n
+      ms -= n * unit
     }
     root.scoreAccruedMs = ms
   }
@@ -361,6 +411,11 @@ Item {
     persist()
   }
 
+  function setConfineOutput(name) {
+    confineOutput = name ? String(name) : ""
+    persist()
+  }
+
   function toggleGraves() {
     gravesShown = !gravesShown
     persist()
@@ -387,12 +442,20 @@ Item {
   }
 
   function owns(kind, id) {
-    var list = kind === "toy" ? ownedToys : ownedHats
+    var list = kind === "toy" ? ownedToys : kind === "gear" ? ownedGear : ownedHats
     if (!list) return false
     for (var i = 0; i < list.length; i++) {
       if (list[i] === id) return true
     }
     return false
+  }
+
+  function gearAutoLabel(auto) {
+    return Model.gearAutoLabel(auto)
+  }
+
+  function priceLabel(n) {
+    return Model.formatCoins(n)
   }
 
   function buyItem(kind, id) {
@@ -405,6 +468,11 @@ Item {
       var toys = (ownedToys || []).slice()
       toys.push(item.id)
       ownedToys = toys
+    } else if (kind === "gear") {
+      var gear = (ownedGear || []).slice()
+      gear.push(item.id)
+      ownedGear = gear
+      if (item.id === "toilet") root.cleanAll()
     } else {
       var hats = (ownedHats || []).slice()
       hats.push(item.id)
@@ -438,6 +506,12 @@ Item {
     persist()
   }
 
+  function lullabyNote() {
+    if (!hatched || root.carePaused) return
+    apply(Model.lullabyNote(snapshot(), Date.now(), root.partSet))
+    persist()
+  }
+
   function lullaby() {
     if (!hatched || root.carePaused) return
     apply(Model.lullaby(snapshot(), Date.now(), root.partSet))
@@ -446,9 +520,38 @@ Item {
 
   function bath() {
     if (!hatched || root.carePaused) return
-    cleanAll()
     apply(Model.bath(snapshot(), Date.now(), root.partSet))
     persist()
+  }
+
+  function wash(amount) {
+    if (!hatched || root.carePaused) return
+    apply(Model.wash(snapshot(), Date.now(), root.partSet, amount))
+    persist()
+  }
+
+  function scoopNear(px, py, output, size, radius) {
+    if (root.carePaused) return false
+    var r2 = radius * radius
+    var best = -1
+    var bestD = r2
+    for (var i = 0; i < messItems.count; i++) {
+      var m = messItems.get(i)
+      var onScreen = m.output ? m.output === output : true
+      if (!onScreen) continue
+      var dx = px - (m.x + size / 2)
+      var dy = py - (m.y + size / 2)
+      var d = dx * dx + dy * dy
+      if (d <= bestD) {
+        bestD = d
+        best = i
+      }
+    }
+    if (best < 0) return false
+    messItems.remove(best)
+    apply(Model.scoopCheer(snapshot(), Date.now(), root.partSet))
+    persist()
+    return true
   }
 
   function beginFarm() {
@@ -479,7 +582,8 @@ Item {
   }
 
   function leaveMess(kind) {
-    if (countKind(kind) >= 10) return
+    if (root.owns("gear", "toilet")) return
+    if (countKind(kind) >= Model.MAX_MESS_EACH) return
     messItems.append({
       kind: kind,
       x: root.dropX + (Math.random() - 0.5) * 28,
@@ -513,11 +617,31 @@ Item {
     persist()
   }
 
+  function expireMess() {
+    if (root.carePaused || messItems.count <= 0) return
+    var now = Date.now()
+    var kept = []
+    for (var i = 0; i < messItems.count; i++) {
+      var m = messItems.get(i)
+      if (now - m.bornAt < Model.MESS_EXPIRE_MS) kept.push({
+        kind: m.kind,
+        x: m.x,
+        y: m.y,
+        bornAt: m.bornAt,
+        output: m.output || ""
+      })
+    }
+    if (kept.length === messItems.count) return
+    messItems.clear()
+    for (var j = 0; j < kept.length; j++) messItems.append(kept[j])
+    persist()
+  }
+
   function maybeLeaveMess() {
     if (!root.maintenance) return
     if (!root.hatched || !root.shown || root.sleeping || root.scene === "tv") return
     var boosted = Date.now() < root.poopBoostUntil
-    var chance = boosted ? 0.028 : 0.007
+    var chance = boosted ? 0.006 : 0.0015
     if (Math.random() > chance) return
     root.leaveMess(Math.random() < 0.7 ? "poop" : "pee")
   }
@@ -525,6 +649,7 @@ Item {
   onHungerChanged: scheduleSave()
   onHappinessChanged: scheduleSave()
   onEnergyChanged: scheduleSave()
+  onDirtyChanged: scheduleSave()
   onSleepingChanged: scheduleSave()
   onShownChanged: scheduleSave()
   onHasPenChanged: scheduleSave()
@@ -541,6 +666,7 @@ Item {
   onScoreChanged: scheduleSave()
   onEquippedHatChanged: scheduleSave()
   onEquippedToyChanged: scheduleSave()
+  onOwnedGearChanged: scheduleSave()
 
   Timer {
     id: tickTimer
@@ -549,6 +675,7 @@ Item {
     running: true
     onTriggered: {
       root.tick()
+      root.expireMess()
       root.maybeLeaveMess()
     }
   }

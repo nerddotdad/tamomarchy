@@ -35,42 +35,63 @@ Item {
   readonly property int spriteScale: 6
   readonly property int spriteW: Model.SPRITE_COLS * spriteScale
   readonly property int spriteH: Model.SPRITE_ROWS * spriteScale
-  readonly property string toyPose: {
-    if (!pet || !pet.hatched || pet.sleeping || pet.scene !== "" || root.holding || root.game !== "")
-      return ""
-    return pet.toyPose || ""
-  }
+  property bool toyPlaying: false
+  property string toyPlayKind: ""
+  property real toyPlayT: 0
+  property real toyPlayElapsed: 0
+  property real toyPlayDur: 8000
+  property int toyPlayDir: 1
+  property int toyThrowPhase: -1
+  property int toyCatchPhase: -1
+  property real toyOffX: 0
+  property real toyOffY: 0
+  property real toyRot: 0
+  property real toyScale: 1
+  property real petRot: 0
+  property bool toyFacingLeft: false
+  property double toyPlayDueAt: 0
+  readonly property real toyDrawX: root.toyOffX
+  readonly property real toyDrawY: Math.round(spriteH * 0.32) + root.toyOffY
+  readonly property bool toyVisible: root.toyPlaying && root.pet && root.pet.toyItem
   readonly property string pose: {
     if (!pet) return "idle"
     if (root.holding) return "walk"
     if (root.game === "sleep") return "sleep"
     if (root.game === "play" && root.moving) return "walk"
     if (!pet.hatched) return "walk"
-    if (root.toyPose === "dance") return "dance"
-    if (root.toyPose === "walk") return "walk"
+    if (root.toyPlaying) {
+      if (root.toyPlayKind === "jump" || root.toyPlayKind === "throw" || root.toyPlayKind === "glide") return "walk"
+      if (root.toyPlayKind === "spin") return "dance"
+      if (root.toyPlayKind === "think" || root.toyPlayKind === "roll") return "sit"
+      return "idle"
+    }
     return Model.poseFor(pet.snapshot(), root.moving, pet.scene)
   }
   readonly property real bounceY: {
-    if (pose === "dance") return Math.round(Math.sin(nowMs / 140) * 7)
-    if (root.toyPose === "jump") return Math.round(Math.abs(Math.sin(nowMs / 180)) * 9)
+    if (root.toyPlaying && root.toyPlayKind === "jump")
+      return Math.round(Math.abs(Math.sin(root.toyPlayT * Math.PI * 6)) * 14)
+    if (pose === "dance" && !root.toyPlaying) return Math.round(Math.sin(nowMs / 140) * 7)
     return 0
   }
   readonly property bool watching: pose === "watch" && root.game === ""
-  readonly property bool dancing: pose === "dance" && root.game === ""
+  readonly property bool dancing: pose === "dance" && root.game === "" && !root.toyPlaying
   readonly property bool drawing: pet ? pet.drawingPen === true : false
   readonly property bool hasPen: pet ? pet.hasPen === true : false
   readonly property int graveCount: pet ? pet.graveCount : 0
+  readonly property int graveRev: pet ? pet.graveRev : 0
   readonly property bool gravesShown: pet ? pet.gravesShown !== false : true
   readonly property bool showGraves: gravesShown && graveCount > 0 && root.game === "" && !root.holding
-  readonly property int graveyardH: showGraves ? 56 : 0
+  readonly property int graveyardSize: 56
   readonly property bool inGame: game !== ""
+  readonly property bool gameSpansScreens: game === "scoop"
   readonly property bool naming: pet ? pet.naming === true : false
   readonly property bool captureInput: drawing || holding || inGame || naming
   readonly property real gameProgress: {
-    if (game === "sleep") return lullabyHits / 8
-    if (game === "eat") return eatScore / 5
-    if (game === "play") return playScore / 3
-    if (game === "bath") return Math.min(1, scrub / 160)
+    if (game === "sleep") return lullabyHits / Math.max(1, gameNeed)
+    if (game === "eat") return eatScore / Math.max(1, gameNeed)
+    if (game === "play") return playScore / Math.max(1, gameNeed)
+    if (game === "bath") return root.pet ? Math.max(0, 1 - root.pet.dirty / 100) : 1
+    if (game === "scoop") return scoopStart > 0 ? Math.max(0, 1 - (root.pet ? root.pet.messCount : 0) / scoopStart) : 1
     if (game === "farm") return Math.min(1, grateTravel / grateNeed)
     return 0
   }
@@ -85,15 +106,43 @@ Item {
   property real menuY: 0
   property string menuOutput: ""
   property string hoverAction: ""
+  readonly property string hoverImpact: {
+    if (hoverAction === "eat")
+      return "Each food: +" + Model.NIBBLE_HUNGER + " hunger · +3 mood"
+    if (hoverAction === "play")
+      return "Each catch: +" + Model.PLAY_HAPPY + " mood · −" + Model.PLAY_ENERGY + " energy · −" + Model.PLAY_HUNGER + " hunger"
+    if (hoverAction === "sleep")
+      return "Each note: +" + Math.round(Model.LULLABY_ENERGY) + " energy · finish to sleep (+" + Model.LULLABY_HAPPY + " mood)"
+    if (hoverAction === "bath")
+      return "Scrub dirt off · +" + Model.BATH_HAPPY + " mood when clean"
+    if (hoverAction === "scoop")
+      return "Scoop poop and pee · +" + Model.SCOOP_HAPPY + " mood each pile"
+    if (hoverAction === "farm")
+      return "Ends their life"
+    return ""
+  }
+  readonly property string hoverFocusStat: {
+    if (hoverAction === "eat") return "hunger"
+    if (hoverAction === "play") return "mood"
+    if (hoverAction === "sleep") return "energy"
+    if (hoverAction === "bath") return "dirty"
+    if (hoverAction === "scoop") return "potty"
+    return ""
+  }
   property string game: ""
   property var lullabyKeys: []
   property int lullabyHits: 0
   property int eatScore: 0
   property int playScore: 0
+  property int gameNeed: 1
   property real scrub: 0
   property real lastBrushX: -1
   property real lastBrushY: -1
   property bool brushHeld: false
+  property bool scoopHeld: false
+  property real lastScoopX: -1
+  property real lastScoopY: -1
+  property int scoopStart: 0
   property double lastScrubSfx: 0
   property double lastGrateSfx: 0
   property real ballX: 0
@@ -217,17 +266,66 @@ Item {
     return first && first.name === screenName
   }
 
+  function graveOnScreen(output, screenName) {
+    var _ = root.graveRev
+    if (output && root.screenByName(output)) return output === screenName
+    if (!output) return root.screenNameAtPet() === screenName
+    var first = root.firstScreen()
+    return first && first.name === screenName
+  }
+
+  function gravesOnScreen(screenName) {
+    if (!root.showGraves || !root.pet) return false
+    var model = root.pet.graveModel
+    if (!model) return false
+    for (var i = 0; i < model.count; i++) {
+      if (root.graveOnScreen(model.get(i).output, screenName)) return true
+    }
+    return false
+  }
+
+  function graveSlot(index, screenName) {
+    var slot = 0
+    if (!root.pet || !root.pet.graveModel) return 0
+    var model = root.pet.graveModel
+    var n = Math.max(0, Math.floor(Number(index) || 0))
+    for (var i = 0; i < n && i < model.count; i++) {
+      if (root.graveOnScreen(model.get(i).output, screenName)) slot++
+    }
+    return slot
+  }
+
+  function graveyardHFor(screenName) {
+    if (!root.showGraves) return 0
+    return root.gravesOnScreen(screenName) ? root.graveyardSize : 0
+  }
+
   function walkBoundsForScreen(s) {
     if (!s) return { minX: 0, maxX: 0, minY: 0, maxY: 0 }
     var minX = s.x + root.barClearance("left")
     var minY = s.y + root.barClearance("top")
     var maxX = Math.max(minX, s.x + s.width - spriteW - root.barClearance("right"))
-    var maxY = Math.max(minY, s.y + s.height - spriteH - root.barClearance("bottom") - 18 - root.graveyardH)
+    var yard = root.graveyardHFor(s.name)
+    var maxY = Math.max(minY, s.y + s.height - spriteH - root.barClearance("bottom") - 18 - yard)
     return { minX: minX, maxX: maxX, minY: minY, maxY: maxY, screen: s }
+  }
+
+  function confineScreen() {
+    if (!root.pet || !root.pet.confineOutput) return null
+    return root.screenByName(root.pet.confineOutput)
+  }
+
+  function screenAllowed(s) {
+    if (!s) return false
+    var lock = root.confineScreen()
+    if (lock && s.name !== lock.name) return false
+    return true
   }
 
   function penApplies() {
     if (!root.pet || !root.pet.hasPen || root.holding || root.inGame) return false
+    if (root.pet.confineOutput && root.pet.penOutput && root.pet.confineOutput !== root.pet.penOutput)
+      return false
     var s = root.screenAtPet()
     return s && s.name === root.pet.penOutput
   }
@@ -236,9 +334,11 @@ Item {
     var rects = []
     var screens = Quickshell.screens
     var pen = root.penApplies()
+    var lock = root.confineScreen()
     for (var i = 0; i < screens.length; i++) {
       var s = screens[i]
       if (!s) continue
+      if (lock && s.name !== lock.name) continue
       if (pen && s.name !== root.pet.penOutput) continue
       var b = root.walkBoundsForScreen(s)
       if (pen) {
@@ -348,7 +448,7 @@ Item {
       dir = "up"
     if (!dir) return false
     var dest = root.screenInDirection(here, dir)
-    if (!dest) return false
+    if (!dest || !root.screenAllowed(dest)) return false
     var tb = root.walkBoundsForScreen(dest)
     var p = root.clampPointToRects(root.petX, root.petY, [tb])
     if (dir === "right") p.x = Math.min(tb.maxX, tb.minX + inward)
@@ -363,7 +463,7 @@ Item {
   }
 
   function clampTo(window) {
-    if (root.inGame && root.gameOutput) {
+    if (root.inGame && root.gameOutput && root.game !== "scoop") {
       var gs = root.screenByName(root.gameOutput)
       if (gs) {
         var gb = root.walkBoundsForScreen(gs)
@@ -382,7 +482,7 @@ Item {
 
   function placeIfNeeded(window) {
     if (root.placed) return
-    var s = root.firstScreen()
+    var s = root.confineScreen() || root.firstScreen()
     if (!s || s.width < 40) return
     var b = root.walkBoundsForScreen(s)
     root.petX = b.minX + (b.maxX - b.minX) * 0.72
@@ -409,6 +509,7 @@ Item {
       root.pet.dropX = root.petX - here.x
       root.pet.dropY = root.petY - here.y
       root.pet.dropOutput = here.name || ""
+      root.pet.pinHomelessGraves(root.pet.dropOutput)
     }
 
     if (root.game === "eat") {
@@ -443,6 +544,16 @@ Item {
     if (!root.pet.hatched) {
       root.moving = false
       root.pet.walking = false
+      return
+    }
+
+    if (root.toyPlaying && !root.canToyPlay())
+      root.endToyPlay(true)
+
+    if (root.toyPlaying) {
+      root.moving = false
+      if (root.pet) root.pet.walking = false
+      root.toyPlayTick(dt)
       return
     }
 
@@ -523,6 +634,7 @@ Item {
       root.pet.dropX = root.petX - s.x
       root.pet.dropY = root.petY - s.y
       root.pet.dropOutput = s.name || ""
+      root.pet.pinHomelessGraves(root.pet.dropOutput)
     }
     root.pickTarget(null)
   }
@@ -544,7 +656,7 @@ Item {
   function actionUnderPet() {
     var s = root.screenAtPet()
     if (!s) return ""
-    var names = ["sleep", "eat", "play", "bath", "farm"]
+    var names = ["sleep", "eat", "play", "bath", "scoop", "farm"]
     var iconW = 56
     var iconH = 70
     var spacing = 4
@@ -575,9 +687,11 @@ Item {
     var s = root.screenAtPet() || root.nearestScreen(root.petX, root.petY)
     if (!s) return
     root.menuOutput = s.name || ""
-    var rowW = 300
-    var rowH = 70
+    var rowW = 360
+    var iconH = 70
+    var extraBelow = 118
     var caption = (root.pet && (root.pet.carePaused || root.pet.crisisSleep)) ? 28 : 0
+    var rowH = iconH + extraBelow
     var minX = 12
     var maxX = Math.max(minX, s.width - rowW - 12)
     var lx = root.petX - s.x
@@ -592,7 +706,125 @@ Item {
     else root.menuY = Math.min(maxY, Math.max(minY, above))
   }
 
+  function canToyPlay() {
+    if (!root.pet || !root.opened || !root.pet.hatched) return false
+    if (!root.pet.equippedToy || !root.pet.toyItem) return false
+    if (root.pet.sleeping || root.holding || root.inGame || root.drawing || root.naming) return false
+    return true
+  }
+
+  function resetToyPlayVisuals() {
+    root.toyPlaying = false
+    root.toyPlayT = 0
+    root.toyPlayElapsed = 0
+    root.toyOffX = 0
+    root.toyOffY = 0
+    root.toyRot = 0
+    root.toyScale = 1
+    root.petRot = 0
+    root.toyFacingLeft = false
+    root.toyThrowPhase = -1
+    root.toyCatchPhase = -1
+  }
+
+  function scheduleToyPlay(ms) {
+    root.toyPlayDueAt = Date.now() + Math.max(400, Math.floor(ms))
+  }
+
+  function nextToyPlayDelay() {
+    return 60000 + Math.floor(Math.random() * 60000)
+  }
+
+  function startToyPlay() {
+    if (!root.canToyPlay()) {
+      root.scheduleToyPlay(8000)
+      return
+    }
+    root.toyPlaying = true
+    root.toyPlayKind = root.pet.toyPlay || "think"
+    root.toyPlayElapsed = 0
+    root.toyPlayT = 0
+    root.toyPlayDur = 12000
+    root.toyPlayDir = root.facingLeft ? -1 : 1
+    root.toyThrowPhase = -1
+    root.toyCatchPhase = -1
+    root.toyPlayTick(0)
+  }
+
+  function endToyPlay(soon) {
+    root.resetToyPlayVisuals()
+    root.scheduleToyPlay(soon ? 12000 + Math.floor(Math.random() * 8000) : root.nextToyPlayDelay())
+  }
+
+  function toyPlayTick(dt) {
+    root.toyPlayElapsed += Math.max(0, dt)
+    var t = root.toyPlayElapsed / root.toyPlayDur
+    if (t >= 1) {
+      root.endToyPlay()
+      return
+    }
+    root.toyPlayT = t
+    var kind = root.toyPlayKind
+    var dir = root.toyPlayDir
+    root.petRot = 0
+    root.toyScale = 1
+    root.toyFacingLeft = false
+    if (kind === "glide") {
+      var passes = 4
+      var u = (t * passes) % 1
+      var goingRight = Math.floor(t * passes) % 2 === 0
+      var ease = 0.5 - 0.5 * Math.cos(u * Math.PI)
+      var span = 58
+      root.toyOffX = goingRight ? (-span + ease * span * 2) : (span - ease * span * 2)
+      root.toyOffY = 0
+      root.toyRot = goingRight ? -3 : 3
+      root.toyFacingLeft = !goingRight
+      root.facingLeft = !goingRight
+    } else if (kind === "roll") {
+      var a = t * Math.PI * 8
+      root.toyOffX = Math.sin(a) * 48
+      root.toyOffY = (1 - Math.abs(Math.cos(a))) * -8
+      root.toyRot = t * 1440
+      root.toyFacingLeft = Math.cos(a) < 0
+      if (Math.cos(a) > 0.2) root.facingLeft = false
+      else if (Math.cos(a) < -0.2) root.facingLeft = true
+    } else if (kind === "jump") {
+      root.toyOffX = 0
+      root.toyOffY = Math.round(-Math.abs(Math.sin(t * Math.PI * 6)) * 10)
+      root.toyRot = 0
+    } else if (kind === "spin") {
+      var s = t * Math.PI * 4
+      root.petRot = t * 720
+      root.toyOffX = Math.cos(s) * 24
+      root.toyOffY = Math.sin(s) * 12 - 4
+      root.toyRot = t * 720
+    } else if (kind === "throw") {
+      var cycles = 2
+      var u = (t * cycles) % 1
+      var phase = Math.floor(t * cycles)
+      if (phase !== root.toyThrowPhase && u < 0.15) {
+        root.toyThrowPhase = phase
+        throwSfx.stop()
+        throwSfx.play()
+      }
+      if (u > 0.88 && root.toyCatchPhase !== phase) {
+        root.toyCatchPhase = phase
+        catchSfx.stop()
+        catchSfx.play()
+      }
+      root.toyOffX = dir * u * 52
+      root.toyOffY = -Math.sin(u * Math.PI) * 36
+      root.toyRot = u * 360 * dir
+    } else {
+      root.toyOffX = dir * 16
+      root.toyOffY = -20 + Math.sin(t * Math.PI * 4) * 5
+      root.toyRot = Math.sin(t * Math.PI * 2) * 14
+      root.toyScale = 1 + 0.06 * Math.sin(t * Math.PI * 4)
+    }
+  }
+
   function grabPet(px, py) {
+    if (root.toyPlaying) root.endToyPlay(true)
     root.holding = true
     root.grabOffX = px - root.petX
     root.grabOffY = py - root.petY
@@ -654,22 +886,35 @@ Item {
     root.grateTravel = 0
     root.eatScore = 0
     root.playScore = 0
+    root.gameNeed = 1
     root.scrub = 0
     root.lullabyHits = 0
     root.ballLive = false
     root.brushHeld = false
+    root.scoopHeld = false
+    root.scoopStart = 0
     root.lastGrateX = -1
     root.lastGrateY = -1
     foods.clear()
     shreds.clear()
+    if (kind === "eat")
+      root.gameNeed = Model.stepsToFill(root.pet.hunger, Model.NIBBLE_HUNGER)
+    else if (kind === "play")
+      root.gameNeed = Model.stepsToFill(root.pet.happiness, Model.PLAY_HAPPY)
+    else if (kind === "sleep")
+      root.gameNeed = Model.stepsToFill(root.pet.energy, Model.LULLABY_ENERGY)
     if (kind === "sleep") {
       var keys = ["W", "A", "S", "D"]
       var seq = []
-      for (var i = 0; i < 8; i++) seq.push(keys[Math.floor(Math.random() * 4)])
+      for (var i = 0; i < root.gameNeed; i++) seq.push(keys[Math.floor(Math.random() * 4)])
       root.lullabyKeys = seq
     }
     if (kind === "bath")
       root.placeBrushBesidePet()
+    if (kind === "scoop") {
+      root.scoopStart = root.pet ? root.pet.messCount : 0
+      root.placeScoopBesidePet()
+    }
   }
 
   function endGame(ok) {
@@ -678,6 +923,7 @@ Item {
     root.gameOutput = ""
     root.holding = false
     root.brushHeld = false
+    root.scoopHeld = false
     foods.clear()
     shreds.clear()
     root.ballLive = false
@@ -740,13 +986,23 @@ Item {
     root.playSfx(grateSfx)
   }
 
+  function gameStepDone(score) {
+    if (score >= root.gameNeed) return true
+    if (!root.pet) return false
+    if (root.game === "eat") return Model.barFull(root.pet.hunger)
+    if (root.game === "play") return Model.barFull(root.pet.happiness)
+    if (root.game === "sleep") return Model.barFull(root.pet.energy)
+    return false
+  }
+
   function pressLullaby(letter) {
     if (root.game !== "sleep" || !letter) return
     root.playLullabyTone(letter)
     var need = root.lullabyKeys[root.lullabyHits] || ""
     if (letter !== need) return
     root.lullabyHits = root.lullabyHits + 1
-    if (root.lullabyHits >= 8) root.endGame(true)
+    if (root.pet) root.pet.lullabyNote()
+    if (root.gameStepDone(root.lullabyHits)) root.endGame(true)
   }
 
   function handleLullabyKey(event) {
@@ -772,7 +1028,7 @@ Item {
         if (root.pet) root.pet.nibble()
         root.playMunch()
         root.spawnHeart()
-        if (root.eatScore >= 5) root.endGame(true)
+        if (root.gameStepDone(root.eatScore)) root.endGame(true)
       }
     }
   }
@@ -827,7 +1083,7 @@ Item {
       root.spawnHeart()
       root.moving = false
       if (root.pet) root.pet.walking = false
-      if (root.playScore >= 3) root.endGame(true)
+      if (root.gameStepDone(root.playScore)) root.endGame(true)
       return
     }
     var speed = 280
@@ -904,12 +1160,52 @@ Item {
       var d = Math.sqrt((px - root.lastBrushX) * (px - root.lastBrushX) + (py - root.lastBrushY) * (py - root.lastBrushY))
       if (px >= lx && px <= lx + spriteW && py >= ly && py <= ly + spriteH) {
         root.scrub += d
-        if (d > 1.5) root.playScrubSfx()
+        if (d > 1.5) {
+          root.playScrubSfx()
+          if (root.pet) root.pet.wash(d * 0.55)
+        }
       }
     }
     root.lastBrushX = px
     root.lastBrushY = py
-    if (root.scrub >= 160) root.endGame(true)
+    if (root.pet && root.pet.dirty <= 0.5) root.endGame(true)
+  }
+
+  function placeScoopBesidePet() {
+    var s = root.screenByName(root.gameOutput) || root.screenAtPet()
+    var originX = s ? s.x : 0
+    var originY = s ? s.y : 0
+    var lx = s ? root.petX - s.x : root.petX
+    var ly = s ? root.petY - s.y : root.petY
+    var w = s ? s.width : 800
+    var right = lx + spriteW + 58
+    var left = lx - 58
+    var x = right
+    if (w > 40 && right > w - root.barClearance("right") - 24)
+      x = left
+    root.lastScoopX = originX + x
+    root.lastScoopY = originY + ly + spriteH * 0.42
+    root.scoopHeld = false
+  }
+
+  function nearScoop(gx, gy) {
+    var dx = gx - root.lastScoopX
+    var dy = gy - root.lastScoopY
+    return (dx * dx + dy * dy) < (38 * 38)
+  }
+
+  function scoopAt(gx, gy) {
+    if (!root.scoopHeld || !root.pet) return
+    root.lastScoopX = gx
+    root.lastScoopY = gy
+    var s = root.screenAt(gx, gy)
+    if (!s) return
+    var size = Model.MESS_COLS * Model.MESS_PIXEL
+    if (root.pet.scoopNear(gx - s.x, gy - s.y, s.name || "", size, Model.MESS_SCOOP_RADIUS)) {
+      root.playSfx(catchSfx)
+      root.spawnHeart()
+      if (root.pet.messCount <= 0) root.endGame(true)
+    }
   }
 
   function spawnShredsAt(gx, gy, gw, n) {
@@ -1010,7 +1306,7 @@ Item {
   Timer {
     interval: (root.pet && !root.pet.hatched) ? 560 : 180
     repeat: true
-    running: root.opened && (root.moving || root.dancing || root.holding || root.toyPose === "walk" || root.toyPose === "jump" || (root.pet && !root.pet.hatched))
+    running: root.opened && (root.moving || root.dancing || root.holding || root.toyPlaying || (root.pet && !root.pet.hatched))
     onTriggered: root.walkFrame = (root.walkFrame + 1) % 2
   }
 
@@ -1042,8 +1338,34 @@ Item {
     target: root.pet
     function onHasPenChanged() { root.applyPenScreen() }
     function onPenOutputChanged() { root.applyPenScreen() }
+    function onConfineOutputChanged() { root.applyPenScreen() }
     function onDrawingPenChanged() {
       root.dragging = false
+    }
+    function onEquippedToyChanged() {
+      if (root.toyPlaying) root.resetToyPlayVisuals()
+      root.toyPlayDueAt = 0
+    }
+    function onShownChanged() {
+      if (root.toyPlaying && !(root.pet && root.pet.shown)) root.resetToyPlayVisuals()
+      root.toyPlayDueAt = 0
+    }
+  }
+
+  Timer {
+    interval: 1000
+    repeat: true
+    running: root.opened && root.pet && root.pet.hatched && !!root.pet.equippedToy
+    onTriggered: {
+      if (root.toyPlaying) return
+      if (!root.pet.toyItem) return
+      if (root.toyPlayDueAt <= 0)
+        root.scheduleToyPlay(3000 + Math.floor(Math.random() * 4000))
+      if (Date.now() < root.toyPlayDueAt) return
+      if (root.canToyPlay())
+        root.startToyPlay()
+      else
+        root.scheduleToyPlay(8000)
     }
   }
 

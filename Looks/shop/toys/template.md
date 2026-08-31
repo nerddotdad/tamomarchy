@@ -2,7 +2,7 @@
 
 id: my-toy
 cost: 25
-pose: idle
+play: think
 
 ```
 ............
@@ -18,7 +18,9 @@ pose: idle
 ............
 ```
 
-`pose` can be `idle`, `walk`, `dance`, or `jump`.
-Copy this file, change the title, `id`, and `cost`, then draw in the grid.
-Add up to four more ` ``` ` fences for animation (they loop on their own).
+`play` is the idle animation: `roll`, `glide`, `jump`, `spin`, `throw`, or `think`.
+Every few minutes they pull the toy out and play. Draw frames to match that motion.
+`glide` slides back and forth (good for cars); `roll` spins (good for balls).
+Copy this file, change the title, `id`, and `cost` (copper), then draw in the grid.
+Add up to four more ` ``` ` fences for animation (they loop during play).
 Do not leave this file named `template.md` — the shop ignores that name.

@@ -29,6 +29,8 @@ Font Awesome Free 6.7.2 icons by Fonticons, Inc. (https://fontawesome.com).
 They are licensed under Creative Commons Attribution 4.0 International
 (CC BY 4.0): https://fontawesome.com/license/free
 
+`icons/scoop.svg`, `icons/coin-gold.svg`, `icons/coin-silver.svg`, and `icons/coin-copper.svg` are original and covered by the MIT License above.
+
 Pixel art and sound effects — the creature parts under `Looks/`, grave and
 mess sprites, and the WAV files under `sounds/` are original work and are
 covered by the MIT License above.

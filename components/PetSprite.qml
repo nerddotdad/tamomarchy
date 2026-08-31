@@ -23,11 +23,18 @@ Item {
   property var shopToy: null
   property int shopFrame: 0
   property var parts: null
+  property var shopGear: null
+  property bool itemOnly: false
+  property real dirty: 0
 
   readonly property int cols: Model.SPRITE_COLS
   readonly property int rows: Model.SPRITE_ROWS
+  readonly property var pixels: Model.framePixels(root.pose, root.frame, root.genome, root.hatched, root.shopHat, root.shopToy, root.shopFrame, root.parts, root.itemOnly, root.shopGear)
+  readonly property int pixelRows: root.pixels && root.pixels.length ? root.pixels.length : root.rows
+  readonly property int bodyOrigin: Math.max(0, root.pixelRows - root.rows)
+  readonly property int hatLift: bodyOrigin * pixelSize
   readonly property int spriteWidth: cols * pixelSize
-  readonly property int spriteHeight: rows * pixelSize
+  readonly property int spriteHeight: pixelRows * pixelSize
 
   implicitWidth: spriteWidth
   implicitHeight: spriteHeight
@@ -46,6 +53,10 @@ Item {
   onShopToyChanged: canvas.requestPaint()
   onShopFrameChanged: canvas.requestPaint()
   onPartsChanged: canvas.requestPaint()
+  onItemOnlyChanged: canvas.requestPaint()
+  onShopGearChanged: canvas.requestPaint()
+  onDirtyChanged: canvas.requestPaint()
+  onPixelsChanged: canvas.requestPaint()
 
   function pixelColor(ch) {
     if (ch === "F" || ch === "S") ch = "D"
@@ -79,7 +90,7 @@ Item {
     onPaint: {
       var ctx = getContext("2d")
       ctx.reset()
-      var pixels = Model.framePixels(root.pose, root.frame, root.genome, root.hatched, root.shopHat, root.shopToy, root.shopFrame, root.parts)
+      var pixels = root.pixels
       var scale = root.pixelSize
       for (var y = 0; y < pixels.length; y++) {
         var row = String(pixels[y] || "")
@@ -89,6 +100,21 @@ Item {
           var dx = root.facingLeft ? (root.cols - 1 - x) : x
           ctx.fillStyle = color
           ctx.fillRect(dx * scale, y * scale, scale, scale)
+        }
+      }
+      if (!root.itemOnly && root.hatched && root.dirty > 0.5) {
+        var spots = Model.DIRT_SPOTS
+        var show = Math.round((root.dirty / 100) * spots.length)
+        var origin = root.bodyOrigin
+        for (var i = 0; i < show && i < spots.length; i++) {
+          var spot = spots[i]
+          var sx = spot[0]
+          var sy = spot[1] + origin
+          var body = String(pixels[sy] || "").charAt(sx)
+          if (!body || body === "." || body === " ") continue
+          var px = root.facingLeft ? (root.cols - 1 - sx) : sx
+          ctx.fillStyle = Model.dirtShade(spot[2])
+          ctx.fillRect(px * scale, sy * scale, scale, scale)
         }
       }
     }

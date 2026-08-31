@@ -99,7 +99,7 @@ Item {
     spacing: 4
 
     Repeater {
-      model: 8
+      model: root.keys && root.keys.length ? root.keys.length : 1
       Rectangle {
         required property int index
         width: 8

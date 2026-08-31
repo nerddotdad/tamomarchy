@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.nerddotdad.tamomarchy",
   "name": "tamOmarchy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "nerddotdad",
   "license": "MIT",
-  "description": "A desktop pet that wanders your screens. Hatch it, feed it, play with it, and care for it from the bar.",
+  "description": "A desktop pet that hatches and wanders your screens. Feed, play, bathe, and scoop from the bar; spend coins on hats, toys, and Home gear.",
   "kinds": [
     "service",
     "overlay",
@@ -19,7 +19,7 @@
   },
   "barWidget": {
     "displayName": "tamOmarchy",
-    "description": "Care for a desktop pet that wanders the screen",
+    "description": "Desktop pet with care, coins, and a shop for hats, toys, and Home gear",
     "category": "Fun",
     "allowMultiple": false,
     "defaultSection": "right"

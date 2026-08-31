@@ -1,14 +1,14 @@
 import QtQuick
 import "../Looks/parts/Parse.js" as Parts
 
-// Reads Looks/parts/{bodies,heads,hats,arms,legs,tails}/*.md and optional
+// Reads Looks/parts/{bodies,heads,horns,arms,legs,tails}/*.md and optional
 // user copies under ~/.config/omarchy/tamomarchy/parts/. template.md is skipped.
 Item {
   id: root
 
   property string home: ""
   property var partSet: Parts.emptySet()
-  readonly property var slots: ["bodies", "heads", "hats", "arms", "legs", "tails"]
+  readonly property var slots: ["bodies", "heads", "horns", "arms", "legs", "tails"]
 
   function userFolder(slot) {
     if (!root.home) return ""
@@ -58,6 +58,8 @@ Item {
         var slot = root.slots[i]
         rows.push({ tag: slot, folder: Qt.resolvedUrl("../Looks/parts/" + slot) })
         rows.push({ tag: slot, folder: root.userFolder(slot) })
+        if (slot === "horns")
+          rows.push({ tag: slot, folder: root.userFolder("hats") })
       }
       return rows
     }
